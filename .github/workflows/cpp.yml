@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 Pawel Pajor
+
+name: cpp
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} ${{ matrix.cxx || 'default' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cxx: g++ }
+          - { os: ubuntu-latest, cxx: clang++ }
+          - { os: macos-latest }
+          - { os: windows-latest }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Configure
+        run: cmake -S cpp -B build ${{ matrix.cxx && format('-DCMAKE_CXX_COMPILER={0}', matrix.cxx) || '' }}
+      - name: Build
+        run: cmake --build build --config Debug
+      - name: Test
+        run: ctest --test-dir build -C Debug --output-on-failure
+      - name: Install
+        run: cmake --install build --config Debug --prefix "${{ github.workspace }}/install"
+      - name: Test the installed package
+        run: |
+          cmake -S cpp/tests/package -B build-package -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" ${{ matrix.cxx && format('-DCMAKE_CXX_COMPILER={0}', matrix.cxx) || '' }}
+          cmake --build build-package --config Debug
+          ctest --test-dir build-package -C Debug --output-on-failure

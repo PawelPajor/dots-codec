@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 Pawel Pajor
+
+name: format
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check formatting
+        run: >
+          git ls-files -z '*.c' '*.h' '*.cpp' '*.hpp' |
+          xargs -0 -r pipx run --spec clang-format==22.1.8 clang-format --dry-run --Werror

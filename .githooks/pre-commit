@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 Pawel Pajor
+
+# Refuses a commit whose staged C or C++ lines are not formatted.
+# Fix with `git clang-format`, then stage the result.
+exec git clang-format --diff --staged
