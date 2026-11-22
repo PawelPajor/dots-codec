@@ -28,10 +28,19 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
+  # greatest (https://github.com/silentbicycle/greatest), v1.5.0.
+  include(FetchContent)
+  FetchContent_Declare(greatest
+    URL https://github.com/silentbicycle/greatest/archive/11a6af1919049df502405913da64fb385c219361.tar.gz
+    URL_HASH SHA256=e1ddc85dc4892318993e0dee0acf891a123eeff9748c549cc19d5387d73b98e1
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_MakeAvailable(greatest)
+
   # A test program in strict C99, with warnings as errors.
   function(dots_test name)
     add_executable(${name} tests/${name}.c)
     target_link_libraries(${name} PRIVATE dots)
+    target_include_directories(${name} PRIVATE ${greatest_SOURCE_DIR})
     set_target_properties(${name} PROPERTIES
       C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
     if(MSVC)
@@ -45,17 +54,27 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
   dots_test(test_dots)
   add_test(NAME test_dots COMMAND test_dots)
 
-  # One test per example of the specification.
+  # One test per example of the specification. A filter that matches no
+  # test passes silently in greatest, so each must report one pass.
   set(DOTS_EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/../spec/examples)
   if(NOT EXISTS ${DOTS_EXAMPLES}/README.md)
     message(FATAL_ERROR "spec/ is empty: run git submodule update --init")
   endif()
-  dots_test(test_examples)
   file(GLOB DOTS_LISTINGS CONFIGURE_DEPENDS ${DOTS_EXAMPLES}/*/*.txt)
+  set(DOTS_EXAMPLE_NAMES "")
   foreach(listing IN LISTS DOTS_LISTINGS)
-    string(REGEX REPLACE "\\.txt$" ".dots" stream ${listing})
     file(RELATIVE_PATH name ${DOTS_EXAMPLES} ${listing})
     string(REGEX REPLACE "\\.txt$" "" name ${name})
-    add_test(NAME example/${name} COMMAND test_examples ${listing} ${stream})
+    string(APPEND DOTS_EXAMPLE_NAMES "  \"${name}\",\n")
+    add_test(NAME example/${name} COMMAND test_examples -e -t example_${name})
+    set_tests_properties(example/${name} PROPERTIES
+      PASS_REGULAR_EXPRESSION "Pass: 1, fail: 0")
   endforeach()
+  file(CONFIGURE OUTPUT examples.h CONTENT [[
+#define DOTS_EXAMPLES_DIR "@DOTS_EXAMPLES@"
+static const char *const examples[] = {
+@DOTS_EXAMPLE_NAMES@};
+]] @ONLY)
+  dots_test(test_examples)
+  target_include_directories(test_examples PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endif()

@@ -18,10 +18,10 @@ port is fixed.
 
 ## Ports
 
-| Directory   | Language | Status  | CI                                                                                                                                                                     |
-|-------------|----------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [c](c/)     | C99      | Planned | [![c](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml)       |
-| [cpp](cpp/) | C++23    | Planned | [![cpp](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml) |
+| Directory   | Language | Status      | CI                                                                                                                                                                     |
+|-------------|----------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [c](c/)     | C99      | In progress | [![c](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml)       |
+| [cpp](cpp/) | C++23    | Planned     | [![cpp](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml) |
 
 More languages follow, in order of demand. Each port has its own
 version and release tags (`c/v0.1.0`, `cpp/v0.1.0`), and every release

@@ -6,23 +6,26 @@
 #define DOTS_IMPLEMENTATION
 #include "dots.h"
 
-#include <stdio.h>
-#include <string.h>
+#include "greatest.h"
 
-static int failures;
-
-static void check(int ok, const char *what) {
-  if (!ok) {
-    fprintf(stderr, "FAIL: %s\n", what);
-    ++failures;
-  }
+TEST spec_version(void) {
+  ASSERT_EQ(0, DOTS_SPEC_MAJOR);
+  ASSERT_EQ(1, DOTS_SPEC_MINOR);
+  PASS();
 }
 
-int main(void) {
-  check(DOTS_SPEC_MAJOR == 0 && DOTS_SPEC_MINOR == 1, "spec version");
-  check(strcmp(dots_code_name(DOTS_OK), "OK") == 0, "name of OK");
-  check(strcmp(dots_code_name(DOTS_INVALID_TEXT), "INVALID_TEXT") == 0,
-        "name of INVALID_TEXT");
-  check(dots_code_name((enum dots_code)9) == 0, "unknown code");
-  return failures != 0;
+TEST code_names(void) {
+  ASSERT_STR_EQ("OK", dots_code_name(DOTS_OK));
+  ASSERT_STR_EQ("INVALID_TEXT", dots_code_name(DOTS_INVALID_TEXT));
+  ASSERT_EQ(0, dots_code_name((enum dots_code)9));
+  PASS();
+}
+
+GREATEST_MAIN_DEFS();
+
+int main(int argc, char **argv) {
+  GREATEST_MAIN_BEGIN();
+  RUN_TEST(spec_version);
+  RUN_TEST(code_names);
+  GREATEST_MAIN_END();
 }
