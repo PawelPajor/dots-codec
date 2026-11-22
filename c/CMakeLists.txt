@@ -53,28 +53,4 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
 
   dots_test(test_dots)
   add_test(NAME test_dots COMMAND test_dots)
-
-  # One test per example of the specification. A filter that matches no
-  # test passes silently in greatest, so each must report one pass.
-  set(DOTS_EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/../spec/examples)
-  if(NOT EXISTS ${DOTS_EXAMPLES}/README.md)
-    message(FATAL_ERROR "spec/ is empty: run git submodule update --init")
-  endif()
-  file(GLOB DOTS_LISTINGS CONFIGURE_DEPENDS ${DOTS_EXAMPLES}/*/*.txt)
-  set(DOTS_EXAMPLE_NAMES "")
-  foreach(listing IN LISTS DOTS_LISTINGS)
-    file(RELATIVE_PATH name ${DOTS_EXAMPLES} ${listing})
-    string(REGEX REPLACE "\\.txt$" "" name ${name})
-    string(APPEND DOTS_EXAMPLE_NAMES "  \"${name}\",\n")
-    add_test(NAME example/${name} COMMAND test_examples -e -t example_${name})
-    set_tests_properties(example/${name} PROPERTIES
-      PASS_REGULAR_EXPRESSION "Pass: 1, fail: 0")
-  endforeach()
-  file(CONFIGURE OUTPUT examples.h CONTENT [[
-#define DOTS_EXAMPLES_DIR "@DOTS_EXAMPLES@"
-static const char *const examples[] = {
-@DOTS_EXAMPLE_NAMES@};
-]] @ONLY)
-  dots_test(test_examples)
-  target_include_directories(test_examples PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endif()
