@@ -160,4 +160,25 @@ const char *dots_code_name(enum dots_code code) {
   return 0;
 }
 
+/* Not implemented yet: reads nothing, and every stream is truncated. */
+
+void dots_reader_init(struct dots_reader *reader) {
+  static const struct dots_reader initial;
+  *reader = initial;
+}
+
+size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
+                        size_t size, struct dots_event *event) {
+  (void)data;
+  reader->offset += size;
+  event->type = DOTS_EVENT_NONE;
+  return size;
+}
+
+void dots_reader_finish(struct dots_reader *reader, struct dots_event *event) {
+  event->type = DOTS_EVENT_ERROR;
+  event->code = DOTS_TRUNCATED;
+  event->offset = reader->offset;
+}
+
 #endif /* DOTS_IMPLEMENTATION */
