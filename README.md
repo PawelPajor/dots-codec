@@ -18,10 +18,10 @@ port is fixed.
 
 ## Ports
 
-| Directory   | Language | Status      | CI                                                                                                                                                                     |
-|-------------|----------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [c](c/)     | C99      | In progress | [![c](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml)       |
-| [cpp](cpp/) | C++23    | Planned     | [![cpp](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml) |
+| Directory       | Language | Status      | CI                                                                                                                                                                           |
+|-----------------|----------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [c99](c99/)     | C99      | In progress | [![c99](https://github.com/PawelPajor/dots-codec/actions/workflows/c99.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/c99.yml)       |
+| [cpp23](cpp23/) | C++23    | Planned     | [![cpp23](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp23.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp23.yml) |
 
 More languages follow, in order of demand. Each port has its own version
 and release tags.
@@ -35,8 +35,8 @@ in the specification.
 
 ```
 spec/        the specification (dots-stream), pinned to a tag
-c/           C99 port
-cpp/         C++23 port
+c99/         C99 port
+cpp23/       C++23 port
 fuzz/        differential fuzzing across ports
 ```
 

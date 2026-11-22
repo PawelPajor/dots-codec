@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # Copyright (c) 2026 Pawel Pajor
 
-name: c
+name: c99
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
         with:
           submodules: true
       - name: Configure
-        run: cmake -S c -B build ${{ matrix.cc && format('-DCMAKE_C_COMPILER={0}', matrix.cc) || '' }}
+        run: cmake -S c99 -B build ${{ matrix.cc && format('-DCMAKE_C_COMPILER={0}', matrix.cc) || '' }}
       - name: Build
         run: cmake --build build --config Debug
       - name: Test
@@ -37,6 +37,6 @@ jobs:
         run: cmake --install build --config Debug --prefix "${{ github.workspace }}/install"
       - name: Test the installed package
         run: |
-          cmake -S c/tests/package -B build-package -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" ${{ matrix.cc && format('-DCMAKE_C_COMPILER={0}', matrix.cc) || '' }}
+          cmake -S c99/tests/package -B build-package -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" ${{ matrix.cc && format('-DCMAKE_C_COMPILER={0}', matrix.cc) || '' }}
           cmake --build build-package --config Debug
           ctest --test-dir build-package -C Debug --output-on-failure
