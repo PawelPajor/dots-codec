@@ -23,9 +23,8 @@ port is fixed.
 | [c](c/)     | C99      | In progress | [![c](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/c.yml)       |
 | [cpp](cpp/) | C++23    | Planned     | [![cpp](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp.yml) |
 
-More languages follow, in order of demand. Each port has its own
-version and release tags (`c/v0.1.0`, `cpp/v0.1.0`), and every release
-states the version of the specification it implements.
+More languages follow, in order of demand. Each port has its own version
+and release tags.
 
 Other implementations of DOTS are welcome. Anyone may implement DOTS
 without asking; see

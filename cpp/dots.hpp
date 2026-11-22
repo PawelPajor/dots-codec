@@ -11,10 +11,9 @@
 
 namespace dots {
 
-// The version of the specification this header implements.
+// The major and minor version a stream carries (HDR-1).
 inline constexpr std::uint64_t spec_major = 0;
 inline constexpr std::uint64_t spec_minor = 1;
-inline constexpr std::uint64_t spec_update = 1;
 
 // Result codes, with the values of the specification.
 enum class code : std::uint8_t {

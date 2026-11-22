@@ -14,10 +14,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The version of the specification this header implements. */
+/* The major and minor version a stream carries (HDR-1). */
 #define DOTS_SPEC_MAJOR 0
 #define DOTS_SPEC_MINOR 1
-#define DOTS_SPEC_UPDATE 1
 
 /* Result codes, with the values of the specification. */
 enum dots_code {

@@ -8,12 +8,6 @@
 
 #include "greatest.h"
 
-TEST spec_version(void) {
-  ASSERT_EQ(0, DOTS_SPEC_MAJOR);
-  ASSERT_EQ(1, DOTS_SPEC_MINOR);
-  PASS();
-}
-
 TEST code_names(void) {
   ASSERT_STR_EQ("OK", dots_code_name(DOTS_OK));
   ASSERT_STR_EQ("INVALID_TEXT", dots_code_name(DOTS_INVALID_TEXT));
@@ -25,7 +19,6 @@ GREATEST_MAIN_DEFS();
 
 int main(int argc, char **argv) {
   GREATEST_MAIN_BEGIN();
-  RUN_TEST(spec_version);
   RUN_TEST(code_names);
   GREATEST_MAIN_END();
 }
