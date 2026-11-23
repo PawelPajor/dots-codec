@@ -66,15 +66,19 @@ enum dots_event_type {
 };
 
 struct dots_header {
-  uint64_t major, minor, update;
+  uint64_t major;
+  uint64_t minor;
+  uint64_t update;
   uint64_t flags;
-  uint64_t columns, rows;
+  uint64_t columns;
+  uint64_t rows;
   uint64_t frame_rate;
 };
 
 struct dots_run {
   int text; /* 1 in the text layer, 0 in the block layer */
-  uint64_t x, y;
+  uint64_t x;
+  uint64_t y;
   uint64_t count;
 };
 
@@ -104,11 +108,14 @@ struct dots_reader {
   uint64_t offset;
   struct dots_header header;
   struct dots_run run;
-  uint64_t value, start;
+  uint64_t value;
+  uint64_t start;
   unsigned shift;
-  uint64_t remaining, cells;
+  uint64_t remaining;
+  uint64_t cells;
   unsigned char utf8[4];
-  unsigned utf8_size, utf8_need;
+  unsigned utf8_size;
+  unsigned utf8_need;
   struct dots_event error;
 };
 
@@ -163,6 +170,7 @@ const char *dots_code_name(enum dots_code code) {
 
 void dots_reader_init(struct dots_reader *reader) {
   static const struct dots_reader initial;
+
   *reader = initial;
 }
 
