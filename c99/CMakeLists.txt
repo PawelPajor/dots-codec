@@ -37,6 +37,20 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
   FetchContent_MakeAvailable(greatest)
 
+  # tomlc17 (https://github.com/cktan/tomlc17), R261116, to read the
+  # .meta files of the validation suite.
+  FetchContent_Declare(tomlc17
+    URL https://github.com/cktan/tomlc17/archive/bfc5b9cd953daa07d095dc7e893954b2115ee8e0.tar.gz
+    URL_HASH SHA256=67b60972577bef40a8cace9e473b2c0f4bcac18503bed57c4686e98936e6e599
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_MakeAvailable(tomlc17)
+  add_library(tomlc17 STATIC ${tomlc17_SOURCE_DIR}/src/tomlc17.c)
+  target_include_directories(tomlc17 PUBLIC ${tomlc17_SOURCE_DIR}/src)
+  set_target_properties(tomlc17 PROPERTIES C_STANDARD 99)
+  if(MSVC)
+    target_compile_definitions(tomlc17 PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+
   # A test program in strict C99, with warnings as errors.
   function(dots_test name)
     add_executable(${name} tests/${name}.c)
@@ -54,4 +68,29 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
 
   dots_test(test_dots)
   add_test(NAME test_dots COMMAND test_dots)
+
+  # One test per case of the validation suite. A name that matches no
+  # test passes silently in greatest, so each must report one pass.
+  set(DOTS_SUITE ${CMAKE_CURRENT_SOURCE_DIR}/../spec/validation-suite)
+  if(NOT EXISTS ${DOTS_SUITE}/README.md)
+    message(FATAL_ERROR "spec/ is empty: run git submodule update --init")
+  endif()
+  file(GLOB DOTS_METAS CONFIGURE_DEPENDS ${DOTS_SUITE}/*/*.meta)
+  set(DOTS_CASES "")
+  foreach(meta IN LISTS DOTS_METAS)
+    file(RELATIVE_PATH case ${DOTS_SUITE} ${meta})
+    string(REGEX REPLACE "\\.meta$" "" case ${case})
+    string(APPEND DOTS_CASES "  \"${case}\",\n")
+    add_test(NAME suite/${case} COMMAND test_suite -e -t suite_${case})
+    set_tests_properties(suite/${case} PROPERTIES
+      PASS_REGULAR_EXPRESSION "Pass: 1, fail: 0")
+  endforeach()
+  file(CONFIGURE OUTPUT suite.h CONTENT [[
+#define DOTS_SUITE_DIR "@DOTS_SUITE@"
+static const char *const cases[] = {
+@DOTS_CASES@};
+]] @ONLY)
+  dots_test(test_suite)
+  target_include_directories(test_suite PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+  target_link_libraries(test_suite PRIVATE tomlc17)
 endif()
