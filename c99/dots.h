@@ -8,7 +8,8 @@
  * Reader and writer of DOTS streams, in C99.
  *
  * Include this header wherever it is needed. In exactly one source
- * file, define DOTS_IMPLEMENTATION before including it.
+ * file, define DOTS_IMPLEMENTATION before including it. Both parts
+ * compile as C++11 and later too.
  *
  * Names of the interface start with `dots_`, or `DOTS_` for macros and
  * constants.
@@ -25,6 +26,10 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** The major version a stream carries (HDR-1). */
 #define DOTS_SPEC_MAJOR 0
@@ -145,25 +150,27 @@ enum dots__state {
   DOTS__STATE_ERROR
 };
 
+/** The state of a reader: private, it may change at any time. */
+struct dots_reader_prv {
+  enum dots__state state;
+  uint64_t offset;
+  struct dots_header header;
+  struct dots_run run;
+  uint64_t value;
+  uint64_t start;
+  unsigned shift;
+  int overflow;
+  uint64_t remaining;
+  uint64_t cells;
+  unsigned char utf8[4];
+  unsigned utf8_size;
+  unsigned utf8_need;
+  struct dots_event error;
+};
+
 /** A reader. */
 struct dots_reader {
-  /** The reader's state: private, it may change at any time. */
-  struct dots_reader_prv {
-    enum dots__state state;
-    uint64_t offset;
-    struct dots_header header;
-    struct dots_run run;
-    uint64_t value;
-    uint64_t start;
-    unsigned shift;
-    int overflow;
-    uint64_t remaining;
-    uint64_t cells;
-    unsigned char utf8[4];
-    unsigned utf8_size;
-    unsigned utf8_need;
-    struct dots_event error;
-  } prv;
+  struct dots_reader_prv prv; /**< private */
 };
 
 /**
@@ -199,10 +206,23 @@ void dots_reader_finish(struct dots_reader *reader, struct dots_event *event);
 
 /** @} */
 
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* DOTS_H */
 
 #if defined(DOTS_IMPLEMENTATION) && !defined(DOTS_IMPLEMENTATION_DONE)
 #define DOTS_IMPLEMENTATION_DONE
+
+/** An initializer of a struct with all members zero, in C and C++. */
+#ifdef __cplusplus
+#define DOTS__ZERO                                                             \
+  {                                                                            \
+  }
+#else
+#define DOTS__ZERO {0}
+#endif
 
 const char *dots_code_name(enum dots_code code) {
   switch (code) {
@@ -300,7 +320,7 @@ static size_t dots__fail(struct dots_reader_prv *prv, enum dots_code code,
 }
 
 void dots_reader_init(struct dots_reader *reader) {
-  static const struct dots_reader initial;
+  static const struct dots_reader initial = DOTS__ZERO;
 
   *reader = initial;
 }
@@ -308,7 +328,7 @@ void dots_reader_init(struct dots_reader *reader) {
 size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
                         size_t size, struct dots_event *event) {
   static const unsigned char fourcc[4] = {0x64, 0x6F, 0x74, 0x73};
-  static const struct dots_event none;
+  static const struct dots_event none = DOTS__ZERO;
   struct dots_reader_prv *prv = &reader->prv;
   size_t used = 0;
 

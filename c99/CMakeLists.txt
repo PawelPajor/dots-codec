@@ -69,6 +69,20 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
   dots_test(test_dots)
   add_test(NAME test_dots COMMAND test_dots)
 
+  # The same tests in C++, where dots.h compiles too.
+  enable_language(CXX)
+  add_executable(test_dots_cpp tests/test_dots_cpp.cpp)
+  target_link_libraries(test_dots_cpp PRIVATE dots::c99)
+  target_include_directories(test_dots_cpp PRIVATE ${greatest_SOURCE_DIR})
+  set_target_properties(test_dots_cpp PROPERTIES
+    CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+  if(MSVC)
+    target_compile_options(test_dots_cpp PRIVATE /W4 /WX)
+  else()
+    target_compile_options(test_dots_cpp PRIVATE -Wall -Wextra -pedantic -Werror)
+  endif()
+  add_test(NAME test_dots_cpp COMMAND test_dots_cpp)
+
   # One test per case of the validation suite. A name that matches no
   # test passes silently in greatest, so each must report one pass.
   set(DOTS_SUITE ${CMAKE_CURRENT_SOURCE_DIR}/../spec/validation-suite)
