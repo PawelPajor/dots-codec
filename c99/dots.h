@@ -157,8 +157,23 @@ enum dots__state {
   DOTS__STATE_ERROR
 };
 
+/** The state of an utf8 decoder. */
+struct dots__utf8_state {
+  unsigned char octets[4]; /**< the current UTF-8 sequence */
+  unsigned size;           /**< its octets read */
+  unsigned need;           /**< its length */
+  uint64_t start;          /**< its offset */
+};
+
+/** What an octet does to a UTF-8 sequence. */
+enum dots__utf8_result {
+  DOTS__UTF8_MORE,   /**< the sequence continues */
+  DOTS__UTF8_DONE,   /**< the sequence ends: it is in prv->utf8 */
+  DOTS__UTF8_INVALID /**< the sequence is ill-formed */
+};
+
 /** The state of a reader: private, it may change at any time. */
-struct dots_reader_prv {
+struct dots__reader_prv {
   enum dots__state state;
   uint64_t offset;
   struct dots_header header;
@@ -168,17 +183,15 @@ struct dots_reader_prv {
   uint64_t start;
   unsigned shift;
   int overflow;
-  uint64_t remaining;
-  uint64_t cells;
-  unsigned char utf8[4];
-  unsigned utf8_size;
-  unsigned utf8_need;
+  uint64_t remaining; /**< data octets left in the run */
+  uint64_t cells;     /**< cells left in the row of the run */
+  struct dots__utf8_state utf8;
   struct dots_event error;
 };
 
 /** A reader. */
 struct dots_reader {
-  struct dots_reader_prv prv; /**< private */
+  struct dots__reader_prv prv; /**< private */
 };
 
 /**
@@ -274,7 +287,7 @@ enum dots__leb128_result {
  * @param octet the octet
  * @return what the octet does to the leb128
  */
-static enum dots__leb128_result dots__leb128(struct dots_reader_prv *prv,
+static enum dots__leb128_result dots__leb128(struct dots__reader_prv *prv,
                                              unsigned char octet) {
   uint64_t bits = octet & 0x7F;
   enum dots__leb128_result result;
@@ -315,12 +328,6 @@ enum dots__token {
   DOTS__END_OF_STREAM = 0xFF
 };
 
-/*
- * Each dots__read_ function reads the start of the input in its state.
- * It uses at least one octet or gives an event, and returns the number
- * of octets used.
- */
-
 /**
  * Gives an error, from now on.
  *
@@ -330,7 +337,7 @@ enum dots__token {
  * @param[out] event the error
  * @return 0, the number of octets used
  */
-static size_t dots__fail(struct dots_reader_prv *prv, enum dots_code code,
+static size_t dots__fail(struct dots__reader_prv *prv, enum dots_code code,
                          uint64_t offset, struct dots_event *event) {
   prv->state = DOTS__STATE_ERROR;
   prv->error.type = DOTS_EVENT_ERROR;
@@ -349,7 +356,7 @@ static size_t dots__fail(struct dots_reader_prv *prv, enum dots_code code,
  * @param[out] event the event
  * @return 1, the number of octets used
  */
-static size_t dots__token(struct dots_reader_prv *prv,
+static size_t dots__token(struct dots__reader_prv *prv,
                           enum dots_event_type type, enum dots__state next,
                           struct dots_event *event) {
   event->type = type;
@@ -365,11 +372,19 @@ static size_t dots__token(struct dots_reader_prv *prv,
  * @param prv the reader's state
  * @return the state
  */
-static enum dots__state dots__layer(const struct dots_reader_prv *prv) {
+static enum dots__state dots__layer(const struct dots__reader_prv *prv) {
   return prv->run.text ? DOTS__STATE_TEXT : DOTS__STATE_BLOCKS;
 }
 
-static size_t dots__read_fourcc(struct dots_reader_prv *prv,
+/**
+ * Reads an octet of the fourcc.
+ *
+ * @param prv the reader's state
+ * @param octet the next octet of the input
+ * @param[out] event the event, if any
+ * @return the number of octets used: at least 1, or 0 with an event
+ */
+static size_t dots__read_fourcc(struct dots__reader_prv *prv,
                                 unsigned char octet, struct dots_event *event) {
   static const unsigned char fourcc[4] = {0x64, 0x6F, 0x74, 0x73};
 
@@ -382,9 +397,16 @@ static size_t dots__read_fourcc(struct dots_reader_prv *prv,
   return 1;
 }
 
-/** Reads a leb128 field: the header, or the start of a run. */
-static size_t dots__read_field(struct dots_reader_prv *prv, unsigned char octet,
-                               struct dots_event *event) {
+/**
+ * Reads an octet of a leb128 field: the header, or the start of a run.
+ *
+ * @param prv the reader's state
+ * @param octet the next octet of the input
+ * @param[out] event the event, if any
+ * @return the number of octets used: at least 1, or 0 with an event
+ */
+static size_t dots__read_field(struct dots__reader_prv *prv,
+                               unsigned char octet, struct dots_event *event) {
   enum dots__leb128_result result = dots__leb128(prv, octet);
   uint64_t value = prv->value;
 
@@ -450,6 +472,7 @@ static size_t dots__read_field(struct dots_reader_prv *prv, unsigned char octet,
       return dots__fail(prv, DOTS_OUTSIDE_GRID, prv->start, event);
     }
     prv->run.x = value;
+    prv->cells = prv->header.columns - value;
     prv->state = DOTS__STATE_Y;
     break;
   case DOTS__STATE_Y:
@@ -482,9 +505,14 @@ static size_t dots__read_field(struct dots_reader_prv *prv, unsigned char octet,
 /**
  * Reads the start of a frame, or end-of-stream. A token other than a
  * clear is left to the block layer.
+ *
+ * @param prv the reader's state
+ * @param octet the next octet of the input
+ * @param[out] event the event, if any
+ * @return the number of octets used: at least 1, or 0 with an event
  */
-static size_t dots__read_frame(struct dots_reader_prv *prv, unsigned char octet,
-                               struct dots_event *event) {
+static size_t dots__read_frame(struct dots__reader_prv *prv,
+                               unsigned char octet, struct dots_event *event) {
   if (octet == DOTS__END_OF_STREAM) {
     return dots__token(prv, DOTS_EVENT_END_OF_STREAM, DOTS__STATE_END, event);
   }
@@ -501,9 +529,16 @@ static size_t dots__read_frame(struct dots_reader_prv *prv, unsigned char octet,
   return 0;
 }
 
-/** Reads the start of a run, or the end of the layer. */
-static size_t dots__read_layer(struct dots_reader_prv *prv, unsigned char octet,
-                               struct dots_event *event) {
+/**
+ * Reads the start of a run, or the end of the layer.
+ *
+ * @param prv the reader's state
+ * @param octet the next octet of the input
+ * @param[out] event the event, if any
+ * @return the number of octets used: at least 1, or 0 with an event
+ */
+static size_t dots__read_layer(struct dots__reader_prv *prv,
+                               unsigned char octet, struct dots_event *event) {
   int text = prv->state == DOTS__STATE_TEXT;
 
   if (octet == DOTS__START_OF_RUN) {
@@ -525,19 +560,163 @@ static size_t dots__read_layer(struct dots_reader_prv *prv, unsigned char octet,
   return dots__fail(prv, DOTS_MALFORMED, prv->offset, event);
 }
 
-/** Reads data of the current run, as much as the input holds (RUN-1). */
-static size_t dots__read_data(struct dots_reader_prv *prv,
-                              const unsigned char *data, size_t size,
-                              struct dots_event *event) {
-  size_t used = prv->remaining < size ? (size_t)prv->remaining : size;
+/**
+ * Reads blocks of the current run, as much as the input and the row
+ * hold (RUN-1, DEC-1, DEC-5).
+ *
+ * @param prv the reader's state
+ * @param data the rest of the input
+ * @param size the number of octets at data, at least 1
+ * @param[out] event the event, if any
+ * @return the number of octets used: at least 1, or 0 with an event
+ */
+static size_t dots__read_blocks(struct dots__reader_prv *prv,
+                                const unsigned char *data, size_t size,
+                                struct dots_event *event) {
+  uint64_t limit = prv->remaining < prv->cells ? prv->remaining : prv->cells;
+  size_t used = limit < size ? (size_t)limit : size;
 
+  if (limit == 0) {
+    return dots__fail(prv, DOTS_OUTSIDE_GRID, prv->offset, event);
+  }
   event->type = DOTS_EVENT_CHUNK;
   event->offset = prv->offset;
   event->chunk.octets = data;
   event->chunk.size = used;
   prv->remaining -= used;
+  prv->cells -= used;
   prv->offset += used;
   prv->state = prv->remaining == 0 ? dots__layer(prv) : DOTS__STATE_DATA;
+  return used;
+}
+
+/**
+ * Reads one octet of a UTF-8 sequence, well-formed as in Section 4 of
+ * RFC 3629 (DEC-3). Its first octet sets prv->utf8.start.
+ *
+ * @param prv the reader's state
+ * @param octet the octet
+ * @return what the octet does to the sequence
+ */
+static enum dots__utf8_result
+dots__read_utf8_state(struct dots__reader_prv *prv, unsigned char octet) {
+  unsigned char low = 0x80;
+  unsigned char high = 0xBF;
+
+  if (prv->utf8.size == 0) {
+    prv->utf8.start = prv->offset;
+    if (octet <= 0x7F) {
+      prv->utf8.need = 1;
+    } else if (octet >= 0xC2 && octet <= 0xDF) {
+      prv->utf8.need = 2;
+    } else if (octet >= 0xE0 && octet <= 0xEF) {
+      prv->utf8.need = 3;
+    } else if (octet >= 0xF0 && octet <= 0xF4) {
+      prv->utf8.need = 4;
+    } else {
+      return DOTS__UTF8_INVALID;
+    }
+  } else {
+    if (prv->utf8.size == 1) {
+      switch (prv->utf8.octets[0]) {
+      case 0xE0:
+        low = 0xA0;
+        break;
+      case 0xED:
+        high = 0x9F;
+        break;
+      case 0xF0:
+        low = 0x90;
+        break;
+      case 0xF4:
+        high = 0x8F;
+        break;
+      default:
+        break;
+      }
+    }
+    if (octet < low || octet > high) {
+      return DOTS__UTF8_INVALID;
+    }
+  }
+  prv->utf8.octets[prv->utf8.size] = octet;
+  ++prv->utf8.size;
+  if (prv->utf8.size < prv->utf8.need) {
+    return DOTS__UTF8_MORE;
+  }
+  prv->utf8.size = 0;
+  return DOTS__UTF8_DONE;
+}
+
+/**
+ * Reads characters of the current run, as much as the input and the
+ * row hold (RUN-1, DEC-2, DEC-3, DEC-5). Gives a chunk of the whole
+ * sequences in the input, or the one sequence begun in an earlier call,
+ * which is in the reader. A sequence that ends past the input is kept
+ * in the reader. Before an error, whole sequences are given first.
+ *
+ * @param prv the reader's state
+ * @param data the rest of the input
+ * @param size the number of octets at data, at least 1
+ * @param[out] event the event, if any
+ * @return the number of octets used: at least 1, or 0 with an event
+ */
+static size_t dots__read_text(struct dots__reader_prv *prv,
+                              const unsigned char *data, size_t size,
+                              struct dots_event *event) {
+  size_t end = prv->remaining < size ? (size_t)prv->remaining : size;
+  int carried = prv->utf8.size != 0;
+  uint64_t start = prv->offset;
+  size_t used = 0;
+  size_t whole = 0;
+  enum dots_code code = DOTS_OK;
+
+  while (used < end && code == DOTS_OK) {
+    enum dots__utf8_result result = dots__read_utf8_state(prv, data[used]);
+
+    if (result == DOTS__UTF8_INVALID) {
+      code = DOTS_INVALID_TEXT;
+    } else if (result == DOTS__UTF8_DONE && prv->cells == 0) {
+      code = DOTS_OUTSIDE_GRID;
+    } else {
+      ++used;
+      ++prv->offset;
+      --prv->remaining;
+      if (result == DOTS__UTF8_DONE) {
+        --prv->cells;
+        whole = used;
+        if (carried) {
+          break;
+        }
+      }
+    }
+  }
+  if (code == DOTS_OK && prv->remaining == 0 && prv->utf8.size != 0) {
+    code = DOTS_INVALID_TEXT; /* the run ends inside a sequence */
+  }
+  if (code != DOTS_OK && whole == 0) {
+    return dots__fail(prv, code, prv->utf8.start, event);
+  }
+  if (code != DOTS_OK) { /* the next call reads the rest again */
+    prv->offset = start + whole;
+    prv->remaining += used - whole;
+    prv->utf8.size = 0;
+    used = whole;
+  }
+  prv->state = prv->remaining == 0 ? dots__layer(prv) : DOTS__STATE_DATA;
+  if (whole == 0) {
+    return used; /* no event: a sequence goes on past the input */
+  }
+  event->type = DOTS_EVENT_CHUNK;
+  if (carried) {
+    event->offset = prv->utf8.start;
+    event->chunk.octets = prv->utf8.octets;
+    event->chunk.size = prv->utf8.need;
+  } else {
+    event->offset = start;
+    event->chunk.octets = data;
+    event->chunk.size = whole;
+  }
   return used;
 }
 
@@ -550,7 +729,7 @@ void dots_reader_init(struct dots_reader *reader) {
 size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
                         size_t size, struct dots_event *event) {
   static const struct dots_event none = DOTS__ZERO;
-  struct dots_reader_prv *prv = &reader->prv;
+  struct dots__reader_prv *prv = &reader->prv;
   size_t used = 0;
 
   if (prv->state == DOTS__STATE_ERROR) {
@@ -588,7 +767,11 @@ size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
       used += dots__read_layer(prv, octet, event);
       break;
     case DOTS__STATE_DATA:
-      used += dots__read_data(prv, data + used, size - used, event);
+      if (prv->run.text) {
+        used += dots__read_text(prv, data + used, size - used, event);
+      } else {
+        used += dots__read_blocks(prv, data + used, size - used, event);
+      }
       break;
     case DOTS__STATE_END:
     case DOTS__STATE_ERROR:
@@ -600,7 +783,7 @@ size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
 
 void dots_reader_finish(struct dots_reader *reader, struct dots_event *event) {
   static const struct dots_event none = DOTS__ZERO;
-  struct dots_reader_prv *prv = &reader->prv;
+  struct dots__reader_prv *prv = &reader->prv;
 
   if (prv->state == DOTS__STATE_ERROR) {
     *event = prv->error;
