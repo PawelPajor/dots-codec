@@ -40,3 +40,36 @@ jobs:
           cmake -S c99/tests/package -B build-package -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" ${{ matrix.cc && format('-DCMAKE_C_COMPILER={0}', matrix.cc) || '' }}
           cmake --build build-package --config Debug
           ctest --test-dir build-package -C Debug --output-on-failure
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Doxygen
+        run: sudo apt-get update && sudo apt-get install -y doxygen
+      - name: Configure
+        run: cmake -S c99 -B build -DBUILD_TESTING=OFF
+      - name: Build the documentation
+        run: cmake --build build --target docs
+      - name: Lay out the site
+        run: mkdir site && cp -R build/html site/c99
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  pages:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docs
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}c99/
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

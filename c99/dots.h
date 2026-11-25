@@ -21,6 +21,52 @@
  * `struct dots_x_prv`.
  */
 
+/**
+ * @mainpage DOTS in C99
+ *
+ * A reader and a writer of
+ * [DOTS](https://github.com/PawelPajor/dots-stream) streams in one
+ * header, dots.h: no dependencies, no allocation. See dots.h for how
+ * to include it.
+ *
+ * Both directions use the same @ref events "events": a header, then
+ * frames, each a block layer and a text layer of runs, then the end of
+ * the stream.
+ *
+ * To play a stream:
+ *
+ * 1. Feed its octets to a @ref reader "reader", which gives one event
+ *    per call.
+ * 2. On the header, start a @ref composer "composer" with cells for
+ *    columns * rows.
+ * 3. Give it every later event. On each end of text, the cells hold
+ *    the frame to show: a cell's character, else its block, as
+ *    dots_braille.
+ *
+ * @code
+ * dots_reader_init(&reader);
+ * while (size > 0) {
+ *   size_t used = dots_reader_feed(&reader, data, size, &event);
+ *
+ *   data += used;
+ *   size -= used;
+ *   if (event.type == DOTS_EVENT_HEADER) {
+ *     dots_composer_init(&composer, &event.header, cells, count);
+ *   } else {
+ *     dots_composer_apply(&composer, &event);
+ *   }
+ *   if (event.type == DOTS_EVENT_END_OF_TEXT) {
+ *     ... show cells ...
+ *   }
+ *   ... stop on DOTS_EVENT_END_OF_STREAM or DOTS_EVENT_ERROR ...
+ * }
+ * dots_reader_finish(&reader, &event);
+ * @endcode
+ *
+ * To make a stream, give the same events in order to a
+ * @ref writer "writer", which encodes each one or refuses it.
+ */
+
 #ifndef DOTS_H
 #define DOTS_H
 
@@ -315,40 +361,6 @@ struct dots_writer {
  *
  * @param writer the writer
  */
-/**
- * Whether the current run can still end well-formed: its data left
- * fits the cells left in its row (DEC-5), and in the text layer
- * completes the sequence in progress (DEC-3). A character takes at
- * most 4 octets.
- *
- * @param prv the reader's state
- * @return DOTS_OK, or the code of the requirement no data can satisfy
- */
-static enum dots_code dots__completable(const struct dots__reader_prv *prv) {
-  uint64_t data = prv->run.data_left;
-  uint64_t cells = prv->run.cells_left;
-
-  if (prv->state != DOTS__STATE_DATA) {
-    return DOTS_OK; /* no run, or it has ended */
-  }
-  if (!prv->run.head.text) {
-    return data <= cells ? DOTS_OK : DOTS_OUTSIDE_GRID;
-  }
-  if (prv->utf8.size < prv->utf8.length) {
-    unsigned need = prv->utf8.length - prv->utf8.size;
-
-    if (data < need) {
-      return DOTS_INVALID_TEXT;
-    }
-    if (cells == 0) {
-      return DOTS_OUTSIDE_GRID;
-    }
-    data -= need;
-    --cells;
-  }
-  return data / 4 + (data % 4 != 0) <= cells ? DOTS_OK : DOTS_OUTSIDE_GRID;
-}
-
 void dots_writer_init(struct dots_writer *writer);
 
 /**
@@ -1194,6 +1206,40 @@ static enum dots_code dots__check(struct dots_reader *reader,
     }
   }
   return DOTS_OK;
+}
+
+/**
+ * Whether the current run can still end well-formed: its data left
+ * fits the cells left in its row (DEC-5), and in the text layer
+ * completes the sequence in progress (DEC-3). A character takes at
+ * most 4 octets.
+ *
+ * @param prv the reader's state
+ * @return DOTS_OK, or the code of the requirement no data can satisfy
+ */
+static enum dots_code dots__completable(const struct dots__reader_prv *prv) {
+  uint64_t data = prv->run.data_left;
+  uint64_t cells = prv->run.cells_left;
+
+  if (prv->state != DOTS__STATE_DATA) {
+    return DOTS_OK; /* no run, or it has ended */
+  }
+  if (!prv->run.head.text) {
+    return data <= cells ? DOTS_OK : DOTS_OUTSIDE_GRID;
+  }
+  if (prv->utf8.size < prv->utf8.length) {
+    unsigned need = prv->utf8.length - prv->utf8.size;
+
+    if (data < need) {
+      return DOTS_INVALID_TEXT;
+    }
+    if (cells == 0) {
+      return DOTS_OUTSIDE_GRID;
+    }
+    data -= need;
+    --cells;
+  }
+  return data / 4 + (data % 4 != 0) <= cells ? DOTS_OK : DOTS_OUTSIDE_GRID;
 }
 
 void dots_writer_init(struct dots_writer *writer) {

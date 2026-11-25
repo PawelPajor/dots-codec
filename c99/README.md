@@ -17,6 +17,13 @@ cmake -S tests/package -B build-package -DCMAKE_PREFIX_PATH="$PWD/install" \
   && cmake --build build-package && ctest --test-dir build-package  # package check
 ```
 
+## Documentation
+
+With [Doxygen](https://www.doxygen.nl) installed, `cmake --build build --target docs`
+writes the documentation of `dots.h` to `build/html/index.html`. A
+documentation error, such as a `@param` naming no parameter, fails
+the build.
+
 ## Tests
 
 The tests use [greatest](https://github.com/silentbicycle/greatest)

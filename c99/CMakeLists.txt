@@ -26,6 +26,16 @@ if(PROJECT_IS_TOP_LEVEL)
     COMPATIBILITY SameMinorVersion ARCH_INDEPENDENT)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dots_stream_c99ConfigVersion.cmake
     DESTINATION ${DOTS_CMAKE_DIR})
+
+  # The documentation of dots.h, built by the docs target.
+  find_package(Doxygen)
+  if(DOXYGEN_FOUND)
+    set(DOXYGEN_EXCLUDE_SYMBOLS dots__* DOTS__* *_prv prv)
+    set(DOXYGEN_WARN_IF_UNDOCUMENTED NO)
+    set(DOXYGEN_WARN_AS_ERROR FAIL_ON_WARNINGS)
+    set(DOXYGEN_GENERATE_LATEX NO)
+    doxygen_add_docs(docs dots.h)
+  endif()
 endif()
 
 if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
