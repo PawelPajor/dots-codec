@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Pawel Pajor
 
 cmake_minimum_required(VERSION 3.21)
-project(dots_stream_c99 VERSION 0.0.0 LANGUAGES C)
+project(dots_stream_c99 VERSION 0.1.0 LANGUAGES C)
 
 include(GNUInstallDirs)
 
