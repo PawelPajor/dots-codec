@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT OR Apache-2.0
  * Copyright (c) 2026 Pawel Pajor
  *
- * The unit tests: one SUITE per unit, the reader, the composer and
- * the internal sub-APIs of dots.h.
+ * The unit tests: one SUITE per unit, the reader, the writer, the
+ * composer and the internal sub-APIs of dots.h.
  */
 
 #define DOTS_IMPLEMENTATION
@@ -182,6 +182,475 @@ SUITE(reader) {
   }
 }
 
+/*
+ * Events for the writer. Designated initializers are not C++11, so
+ * each is made by a function.
+ */
+static struct dots_event header_event(uint64_t major, uint64_t minor,
+                                      uint64_t flags, uint64_t columns,
+                                      uint64_t rows) {
+  struct dots_event event = DOTS__ZERO;
+
+  event.type = DOTS_EVENT_HEADER;
+  event.header.major = major;
+  event.header.minor = minor;
+  event.header.flags = flags;
+  event.header.columns = columns;
+  event.header.rows = rows;
+  event.header.frame_rate = 10;
+  return event;
+}
+
+static struct dots_event frame_event(int clear) {
+  struct dots_event event = DOTS__ZERO;
+
+  event.type = DOTS_EVENT_FRAME;
+  event.clear = clear;
+  return event;
+}
+
+static struct dots_event run_event(int text, uint64_t x, uint64_t y,
+                                   uint64_t count) {
+  struct dots_event event = DOTS__ZERO;
+
+  event.type = DOTS_EVENT_RUN;
+  event.run.text = text;
+  event.run.x = x;
+  event.run.y = y;
+  event.run.count = count;
+  return event;
+}
+
+static struct dots_event chunk_event(const unsigned char *octets, size_t size) {
+  struct dots_event event = DOTS__ZERO;
+
+  event.type = DOTS_EVENT_CHUNK;
+  event.chunk.octets = octets;
+  event.chunk.size = size;
+  return event;
+}
+
+static struct dots_event token_event(enum dots_event_type type) {
+  struct dots_event event = DOTS__ZERO;
+
+  event.type = type;
+  return event;
+}
+
+/* Writes an event, with room for any. */
+static struct dots_writer_result put(struct dots_writer *writer,
+                                     struct dots_event event) {
+  unsigned char out[DOTS_WRITER_MAX];
+
+  return dots_writer_put(writer, &event, out, sizeof out);
+}
+
+/* Starts a stream of 16 x 4 cells, and a frame without a clear. */
+static void start(struct dots_writer *writer, uint64_t flags) {
+  dots_writer_init(writer);
+  put(writer, header_event(0, 1, flags, 16, 4));
+  put(writer, frame_event(0));
+}
+
+#define ASSERT_WRITTEN(result) ASSERT_EQ(DOTS_WRITER_OK, (result).status)
+
+#define ASSERT_REFUSED(status_, code_, result)                                 \
+  do {                                                                         \
+    struct dots_writer_result refused = (result);                              \
+                                                                               \
+    ASSERT_EQ(status_, refused.status);                                        \
+    ASSERT_EQ(code_, refused.code);                                            \
+    ASSERT_EQ(0, refused.size);                                                \
+  } while (0)
+
+/*
+ * The stream of the reader's test events, written: a frame without a
+ * clear is written as nothing.
+ */
+TEST writer_stream(void) {
+  static const unsigned char stream[] = {
+      0x64, 0x6F, 0x74, 0x73, 0x00, 0x01, 0x00, 0x01, 0x10,
+      0x04, 0x0A, 0x01, 0x02, 0x03, 0x01, 0x02, 0x39, 0x47,
+      0xFE, 0xFD, 0xFE, 0x02, 0x00, 0x00, 0x00, 0xFD, 0xFF};
+  static const unsigned char blocks[] = {0x39, 0x47};
+  struct dots_event events[11];
+  unsigned char out[sizeof stream];
+  struct dots_writer writer;
+  size_t size = 0;
+  size_t i;
+
+  events[0] = header_event(0, 1, 1, 16, 4);
+  events[1] = frame_event(1);
+  events[2] = run_event(0, 3, 1, 2);
+  events[3] = chunk_event(blocks, sizeof blocks);
+  events[4] = token_event(DOTS_EVENT_END_OF_BLOCKS);
+  events[5] = token_event(DOTS_EVENT_END_OF_TEXT);
+  events[6] = frame_event(0);
+  events[7] = token_event(DOTS_EVENT_END_OF_BLOCKS);
+  events[8] = run_event(1, 0, 0, 0);
+  events[9] = token_event(DOTS_EVENT_END_OF_TEXT);
+  events[10] = token_event(DOTS_EVENT_END_OF_STREAM);
+  dots_writer_init(&writer);
+  for (i = 0; i < sizeof events / sizeof events[0]; ++i) {
+    struct dots_writer_result result =
+        dots_writer_put(&writer, &events[i], out + size, sizeof out - size);
+
+    ASSERT_WRITTEN(result);
+    size += result.size;
+  }
+  ASSERT_EQ(sizeof stream, size);
+  ASSERT_MEM_EQ(stream, out, size);
+  PASS();
+}
+
+/* A header of the most octets: DOTS_WRITER_MAX. */
+TEST writer_max(void) {
+  struct dots_event header = header_event(0, 1, 0, 1, 1);
+  unsigned char out[DOTS_WRITER_MAX];
+  struct dots_writer writer;
+  struct dots_writer_result result;
+
+  header.header.update = UINT64_MAX;
+  header.header.frame_rate = UINT64_MAX;
+  dots_writer_init(&writer);
+  result = dots_writer_put(&writer, &header, out, sizeof out);
+  ASSERT_WRITTEN(result);
+  ASSERT_EQ(4 + 1 + 1 + 10 + 1 + 1 + 1 + 10, result.size);
+  PASS();
+}
+
+/* A character split across chunks. */
+TEST writer_split_text(void) {
+  static const unsigned char euro[] = {0xE2, 0x82, 0xAC};
+  struct dots_writer writer;
+  size_t i;
+
+  start(&writer, 1);
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_BLOCKS)));
+  ASSERT_WRITTEN(put(&writer, run_event(1, 15, 3, sizeof euro)));
+  for (i = 0; i < sizeof euro; ++i) {
+    ASSERT_WRITTEN(put(&writer, chunk_event(euro + i, 1)));
+  }
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_TEXT)));
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_STREAM)));
+  PASS();
+}
+
+/* Events the stream has no place for next. */
+TEST writer_out_of_order(void) {
+  static const unsigned char block = 0;
+  struct dots_writer writer;
+
+  dots_writer_init(&writer);
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, frame_event(1)));
+  start(&writer, 1);
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, header_event(0, 1, 1, 16, 4)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, frame_event(1)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, token_event(DOTS_EVENT_END_OF_STREAM)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, run_event(1, 0, 0, 1)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, chunk_event(&block, 1)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, token_event(DOTS_EVENT_END_OF_TEXT)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, token_event(DOTS_EVENT_NONE)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, token_event(DOTS_EVENT_ERROR)));
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_BLOCKS)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, run_event(0, 0, 0, 1)));
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_TEXT)));
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_STREAM)));
+  ASSERT_REFUSED(DOTS_WRITER_OUT_OF_ORDER, DOTS_OK,
+                 put(&writer, frame_event(1)));
+  PASS();
+}
+
+/* A chunk past the count of its run, then one that fits. */
+TEST writer_past_count(void) {
+  static const unsigned char blocks[] = {1, 2, 3};
+  struct dots_writer writer;
+
+  start(&writer, 0);
+  ASSERT_WRITTEN(put(&writer, run_event(0, 0, 0, 2)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(blocks, 1)));
+  ASSERT_REFUSED(DOTS_WRITER_PAST_COUNT, DOTS_OK,
+                 put(&writer, chunk_event(blocks, 2)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(blocks, 1)));
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_BLOCKS)));
+  PASS();
+}
+
+/* Octets that do not fit, then the same event with room. */
+TEST writer_no_space(void) {
+  static const unsigned char blocks[] = {1, 2};
+  struct dots_event header = header_event(0, 1, 0, 16, 4);
+  struct dots_event chunk = chunk_event(blocks, sizeof blocks);
+  unsigned char out[DOTS_WRITER_MAX];
+  struct dots_writer writer;
+
+  dots_writer_init(&writer);
+  ASSERT_REFUSED(DOTS_WRITER_NO_SPACE, DOTS_OK,
+                 dots_writer_put(&writer, &header, out, 10));
+  ASSERT_WRITTEN(dots_writer_put(&writer, &header, out, 11));
+  ASSERT_WRITTEN(put(&writer, frame_event(0)));
+  ASSERT_WRITTEN(put(&writer, run_event(0, 0, 0, sizeof blocks)));
+  ASSERT_REFUSED(DOTS_WRITER_NO_SPACE, DOTS_OK,
+                 dots_writer_put(&writer, &chunk, out, 1));
+  ASSERT_WRITTEN(dots_writer_put(&writer, &chunk, out, 2));
+  PASS();
+}
+
+/* Headers that break HDR-1, HDR-3 and HDR-4. */
+TEST writer_ill_formed_header(void) {
+  struct dots_writer writer;
+
+  dots_writer_init(&writer);
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_UNSUPPORTED_VERSION,
+                 put(&writer, header_event(1, 1, 0, 16, 4)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_UNSUPPORTED_VERSION,
+                 put(&writer, header_event(0, 2, 0, 16, 4)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_INVALID_VALUE,
+                 put(&writer, header_event(0, 1, 2, 16, 4)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_INVALID_VALUE,
+                 put(&writer, header_event(0, 1, 0, 0, 4)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_INVALID_VALUE,
+                 put(&writer, header_event(0, 1, 0, 16, 0)));
+  ASSERT_WRITTEN(put(&writer, header_event(0, 1, 0, 16, 4)));
+  PASS();
+}
+
+/* Runs that break HDR-5, RUN-2, DEC-3 and DEC-5. */
+TEST writer_ill_formed_run(void) {
+  static const unsigned char blocks[] = {1, 2};
+  static const unsigned char invalid[] = {0x41, 0xC0};
+  static const unsigned char euro[] = {0xE2, 0x82, 0xAC};
+  struct dots_writer writer;
+
+  start(&writer, 0);
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
+                 put(&writer, run_event(0, 16, 0, 1)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
+                 put(&writer, run_event(0, 0, 4, 1)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
+                 put(&writer, run_event(0, 15, 0, 2)));
+  ASSERT_WRITTEN(put(&writer, run_event(0, 14, 0, sizeof blocks)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(blocks, sizeof blocks)));
+
+  start(&writer, 0);
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_BLOCKS)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_UNEXPECTED_TEXT,
+                 put(&writer, run_event(1, 0, 0, 0)));
+
+  start(&writer, 1);
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_BLOCKS)));
+  ASSERT_WRITTEN(put(&writer, run_event(1, 0, 0, sizeof invalid)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_INVALID_TEXT,
+                 put(&writer, chunk_event(invalid, sizeof invalid)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(invalid, 1)));
+
+  start(&writer, 1);
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_BLOCKS)));
+  ASSERT_WRITTEN(put(&writer, run_event(1, 0, 0, 2)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_INVALID_TEXT,
+                 put(&writer, chunk_event(euro, 2)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_INVALID_TEXT,
+                 put(&writer, chunk_event(euro, 1)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(blocks, 1)));
+  PASS();
+}
+
+/*
+ * Runs and chunks after which no data can end the run well-formed, at
+ * column 14 of 16: 2 blocks, or 8 octets of text, fit what is left.
+ */
+TEST writer_dead_end(void) {
+  static const unsigned char text[] = {0x41, 0x41, 0xE2, 0x82, 0xAC};
+  static const unsigned char emoji[] = {0xF0, 0x9F, 0x98, 0x80};
+  struct dots_writer writer;
+
+  start(&writer, 1);
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
+                 put(&writer, run_event(0, 14, 0, 3)));
+  ASSERT_WRITTEN(put(&writer, run_event(0, 14, 0, 2)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(text, 1)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(text, 1)));
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_BLOCKS)));
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
+                 put(&writer, run_event(1, 14, 0, 9)));
+  ASSERT_WRITTEN(put(&writer, run_event(1, 14, 0, 5)));
+  /* "A" leaves 4 octets for 1 cell; "AA" would leave 3 for none */
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
+                 put(&writer, chunk_event(text, 2)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(text, 1)));
+  /* a 3-octet character in the last cell would leave 1 octet over */
+  ASSERT_REFUSED(DOTS_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
+                 put(&writer, chunk_event(text + 2, 1)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(emoji, 2)));
+  ASSERT_WRITTEN(put(&writer, chunk_event(emoji + 2, 2)));
+  ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVENT_END_OF_TEXT)));
+  PASS();
+}
+
+/* Events with their chunks merged: the octets of all in a row. */
+struct trace {
+  struct dots_event events[16];
+  size_t count;
+  unsigned char data[64];
+  size_t size;
+};
+
+/* Adds an event other than NONE; returns 0 if the trace is full. */
+static int trace_add(struct trace *trace, const struct dots_event *event) {
+  size_t i;
+
+  if (event->type == DOTS_EVENT_NONE) {
+    return 1;
+  }
+  if (event->type == DOTS_EVENT_CHUNK) {
+    if (trace->size + event->chunk.size > sizeof trace->data) {
+      return 0;
+    }
+    for (i = 0; i < event->chunk.size; ++i) {
+      trace->data[trace->size + i] = event->chunk.octets[i];
+    }
+    trace->size += event->chunk.size;
+    if (trace->count > 0 &&
+        trace->events[trace->count - 1].type == DOTS_EVENT_CHUNK) {
+      return 1;
+    }
+  }
+  if (trace->count == sizeof trace->events / sizeof trace->events[0]) {
+    return 0;
+  }
+  trace->events[trace->count] = *event;
+  ++trace->count;
+  return 1;
+}
+
+/* Whether two events of traces say the same, apart from offset. */
+static int same_event(const struct dots_event *a, const struct dots_event *b) {
+  if (a->type != b->type) {
+    return 0;
+  }
+  switch (a->type) {
+  case DOTS_EVENT_HEADER:
+    return a->header.major == b->header.major &&
+           a->header.minor == b->header.minor &&
+           a->header.update == b->header.update &&
+           a->header.flags == b->header.flags &&
+           a->header.columns == b->header.columns &&
+           a->header.rows == b->header.rows &&
+           a->header.frame_rate == b->header.frame_rate;
+  case DOTS_EVENT_FRAME:
+    return a->clear == b->clear;
+  case DOTS_EVENT_RUN:
+    return a->run.text == b->run.text && a->run.x == b->run.x &&
+           a->run.y == b->run.y && a->run.count == b->run.count;
+  case DOTS_EVENT_ERROR:
+    return a->code == b->code;
+  case DOTS_EVENT_NONE:
+  case DOTS_EVENT_CHUNK:
+  case DOTS_EVENT_END_OF_BLOCKS:
+  case DOTS_EVENT_END_OF_TEXT:
+  case DOTS_EVENT_END_OF_STREAM:
+    return 1;
+  }
+  return 0;
+}
+
+/*
+ * Writes a full stream from events, then reads it with a new reader in
+ * chunks of every size: the same events, and the same run data, come
+ * back. The data is written in chunks that cut UTF-8 sequences, and
+ * read back in chunks of whole ones.
+ */
+TEST writer_then_reader(void) {
+  static const unsigned char blocks[] = {0x01, 0x80, 0xFF, 0x00};
+  static const unsigned char text[] = {0x41, 0xE2, 0x82, 0xAC,
+                                       0xF0, 0x9F, 0x98, 0x80};
+  struct dots_event events[16];
+  struct trace written = DOTS__ZERO;
+  unsigned char stream[128];
+  struct dots_writer writer;
+  size_t count = 0;
+  size_t size = 0;
+  size_t chunk;
+  size_t i;
+
+  events[count++] = header_event(0, 1, 1, 4, 2);
+  events[count++] = frame_event(0);
+  events[count++] = run_event(0, 0, 0, sizeof blocks);
+  events[count++] = chunk_event(blocks, 2);
+  events[count++] = chunk_event(blocks + 2, 2);
+  events[count++] = token_event(DOTS_EVENT_END_OF_BLOCKS);
+  events[count++] = run_event(1, 1, 1, sizeof text);
+  events[count++] = chunk_event(text, 2);
+  events[count++] = chunk_event(text + 2, 1);
+  events[count++] = chunk_event(text + 3, 3);
+  events[count++] = chunk_event(text + 6, 2);
+  events[count++] = token_event(DOTS_EVENT_END_OF_TEXT);
+  events[count++] = frame_event(1);
+  events[count++] = token_event(DOTS_EVENT_END_OF_BLOCKS);
+  events[count++] = token_event(DOTS_EVENT_END_OF_TEXT);
+  events[count++] = token_event(DOTS_EVENT_END_OF_STREAM);
+
+  dots_writer_init(&writer);
+  for (i = 0; i < count; ++i) {
+    struct dots_writer_result result = dots_writer_put(
+        &writer, &events[i], stream + size, sizeof stream - size);
+
+    ASSERT_WRITTEN(result);
+    size += result.size;
+    ASSERT(trace_add(&written, &events[i]));
+  }
+
+  for (chunk = 1; chunk <= size; ++chunk) {
+    struct trace read = DOTS__ZERO;
+    struct dots_reader reader;
+    struct dots_event event;
+    size_t at = 0;
+
+    dots_reader_init(&reader);
+    while (at < size) {
+      size_t end = at + chunk < size ? at + chunk : size;
+
+      while (at < end) {
+        at += dots_reader_feed(&reader, stream + at, end - at, &event);
+        ASSERT(event.type != DOTS_EVENT_ERROR);
+        ASSERT(trace_add(&read, &event));
+      }
+    }
+    dots_reader_finish(&reader, &event);
+    ASSERT_EQ(DOTS_EVENT_END_OF_STREAM, event.type);
+    ASSERT_EQ(written.count, read.count);
+    for (i = 0; i < written.count; ++i) {
+      ASSERT(same_event(&written.events[i], &read.events[i]));
+    }
+    ASSERT_EQ(written.size, read.size);
+    ASSERT_MEM_EQ(written.data, read.data, written.size);
+  }
+  PASS();
+}
+
+SUITE(writer) {
+  RUN_TEST(writer_stream);
+  RUN_TEST(writer_max);
+  RUN_TEST(writer_split_text);
+  RUN_TEST(writer_out_of_order);
+  RUN_TEST(writer_past_count);
+  RUN_TEST(writer_no_space);
+  RUN_TEST(writer_ill_formed_header);
+  RUN_TEST(writer_ill_formed_run);
+  RUN_TEST(writer_dead_end);
+  RUN_TEST(writer_then_reader);
+}
+
 /* A leb128, and what its last octet does to it. */
 struct leb128_case {
   const char *name;
@@ -238,8 +707,8 @@ static const struct leb128_case leb128_cases[] = {
      DOTS__LEB128_READER_MALFORMED,
      0}};
 
-/* Pushes a leb128 at offset 1000, octet by octet. */
-TEST leb128_push(const struct leb128_case *test) {
+/* Reads a leb128 at offset 1000, octet by octet. */
+TEST leb128_read(const struct leb128_case *test) {
   struct dots__leb128_reader leb128 = DOTS__ZERO;
   size_t i;
 
@@ -253,6 +722,15 @@ TEST leb128_push(const struct leb128_case *test) {
   if (test->result == DOTS__LEB128_READER_DONE) {
     ASSERT_EQ(test->value, leb128.value);
   }
+  PASS();
+}
+
+/* Writes the value of a well-formed leb128: the same octets. */
+TEST leb128_write(const struct leb128_case *test) {
+  unsigned char octets[10];
+
+  ASSERT_EQ(test->size, dots__leb128_write(test->value, octets));
+  ASSERT_MEM_EQ(test->octets, octets, test->size);
   PASS();
 }
 
@@ -273,9 +751,15 @@ SUITE(leb128) {
 
   for (i = 0; i < sizeof leb128_cases / sizeof leb128_cases[0]; ++i) {
     greatest_set_test_suffix(leb128_cases[i].name);
-    RUN_TEST1(leb128_push, &leb128_cases[i]);
+    RUN_TEST1(leb128_read, &leb128_cases[i]);
   }
   RUN_TEST(leb128_in_a_row);
+  for (i = 0; i < sizeof leb128_cases / sizeof leb128_cases[0]; ++i) {
+    if (leb128_cases[i].result == DOTS__LEB128_READER_DONE) {
+      greatest_set_test_suffix(leb128_cases[i].name);
+      RUN_TEST1(leb128_write, &leb128_cases[i]);
+    }
+  }
 }
 
 /*
@@ -524,6 +1008,7 @@ GREATEST_MAIN_DEFS();
 int main(int argc, char **argv) {
   GREATEST_MAIN_BEGIN();
   RUN_SUITE(reader);
+  RUN_SUITE(writer);
   RUN_SUITE(leb128);
   RUN_SUITE(utf8);
   RUN_SUITE(composer);

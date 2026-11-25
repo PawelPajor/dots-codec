@@ -260,6 +260,121 @@ void dots_reader_finish(struct dots_reader *reader, struct dots_event *event);
 /** @} */
 
 /**
+ * @defgroup writer Writer
+ *
+ * Encodes events into a stream, one call per event, in buffers the
+ * caller provides. It refuses any event that would make the stream
+ * ill-formed (CNF-1), and then writes nothing and keeps its state. The
+ * writer allocates nothing and never holds the stream.
+ *
+ * @code
+ * struct dots_writer writer;
+ * struct dots_writer_result result;
+ *
+ * dots_writer_init(&writer);
+ * for each event, up to END_OF_STREAM:
+ *   result = dots_writer_put(&writer, &event, out, capacity);
+ *   ... on DOTS_WRITER_OK, out holds result.size octets of the stream ...
+ * @endcode
+ *
+ * @{
+ */
+
+/** The most octets an event other than a chunk is written as. */
+#define DOTS_WRITER_MAX 74
+
+/** What the writer did with an event. */
+enum dots_writer_status {
+  DOTS_WRITER_OK,           /**< the event is written */
+  DOTS_WRITER_ILL_FORMED,   /**< it breaks a stream requirement: code */
+  DOTS_WRITER_OUT_OF_ORDER, /**< the stream has no such event next */
+  DOTS_WRITER_PAST_COUNT,   /**< a chunk past the count of its run */
+  DOTS_WRITER_NO_SPACE      /**< its octets do not fit the capacity */
+};
+
+/** The result of a call of the writer. */
+struct dots_writer_result {
+  enum dots_writer_status status;
+  enum dots_code code; /**< the code of the requirement, if ILL_FORMED */
+  size_t size;         /**< the number of octets written */
+};
+
+/** The state of a writer: private, it may change at any time. */
+struct dots__writer_prv {
+  struct dots_reader reader; /**< has read every octet written */
+  int frame; /**< a frame without a clear has started, none of it written */
+};
+
+/** A writer. */
+struct dots_writer {
+  struct dots__writer_prv prv; /**< private */
+};
+
+/**
+ * Starts writing a stream.
+ *
+ * @param writer the writer
+ */
+/**
+ * Whether the current run can still end well-formed: its data left
+ * fits the cells left in its row (DEC-5), and in the text layer
+ * completes the sequence in progress (DEC-3). A character takes at
+ * most 4 octets.
+ *
+ * @param prv the reader's state
+ * @return DOTS_OK, or the code of the requirement no data can satisfy
+ */
+static enum dots_code dots__completable(const struct dots__reader_prv *prv) {
+  uint64_t data = prv->run.data_left;
+  uint64_t cells = prv->run.cells_left;
+
+  if (prv->state != DOTS__STATE_DATA) {
+    return DOTS_OK; /* no run, or it has ended */
+  }
+  if (!prv->run.head.text) {
+    return data <= cells ? DOTS_OK : DOTS_OUTSIDE_GRID;
+  }
+  if (prv->utf8.size < prv->utf8.length) {
+    unsigned need = prv->utf8.length - prv->utf8.size;
+
+    if (data < need) {
+      return DOTS_INVALID_TEXT;
+    }
+    if (cells == 0) {
+      return DOTS_OUTSIDE_GRID;
+    }
+    data -= need;
+    --cells;
+  }
+  return data / 4 + (data % 4 != 0) <= cells ? DOTS_OK : DOTS_OUTSIDE_GRID;
+}
+
+void dots_writer_init(struct dots_writer *writer);
+
+/**
+ * Writes an event. A frame without a clear is written as nothing: its
+ * first octet belongs to its block layer. A chunk of the text layer may
+ * end inside a UTF-8 sequence, which the next chunk continues. A run
+ * or a chunk after which no data can end the run well-formed is
+ * refused: blocks past the row, more than 4 octets per cell left of
+ * text, or too few octets for the sequence in progress. The
+ * offset, and the members the type of the event does not name, are
+ * ignored.
+ *
+ * @param writer the writer
+ * @param event the event
+ * @param[out] out where its octets go
+ * @param capacity the number of octets out holds: DOTS_WRITER_MAX for
+ *        any event but a chunk, which needs its size
+ * @return DOTS_WRITER_OK and the octets written, or a refusal
+ */
+struct dots_writer_result dots_writer_put(struct dots_writer *writer,
+                                          const struct dots_event *event,
+                                          unsigned char *out, size_t capacity);
+
+/** @} */
+
+/**
  * @defgroup composer Composer
  *
  * Applies the events of a reader to the state of the grid (CMP-1 to
@@ -432,6 +547,9 @@ enum dots__token {
   DOTS__END_OF_STREAM = 0xFF
 };
 
+/** The fourcc (Section 5). */
+static const unsigned char dots__fourcc[4] = {0x64, 0x6F, 0x74, 0x73};
+
 /**
  * Gives an error, from now on.
  *
@@ -490,13 +608,11 @@ static enum dots__state dots__layer(const struct dots__reader_prv *prv) {
  */
 static size_t dots__read_fourcc(struct dots__reader_prv *prv,
                                 unsigned char octet, struct dots_event *event) {
-  static const unsigned char fourcc[4] = {0x64, 0x6F, 0x74, 0x73};
-
-  if (octet != fourcc[prv->offset]) {
+  if (octet != dots__fourcc[prv->offset]) {
     return dots__fail(prv, DOTS_MALFORMED, prv->offset, event);
   }
-  prv->state =
-      prv->offset + 1 == sizeof fourcc ? DOTS__STATE_MAJOR : DOTS__STATE_FOURCC;
+  prv->state = prv->offset + 1 == sizeof dots__fourcc ? DOTS__STATE_MAJOR
+                                                      : DOTS__STATE_FOURCC;
   ++prv->offset;
   return 1;
 }
@@ -944,6 +1060,194 @@ void dots_reader_finish(struct dots_reader *reader, struct dots_event *event) {
   event->type = DOTS_EVENT_ERROR;
   event->code = DOTS_TRUNCATED;
   event->offset = prv->offset;
+}
+
+/**
+ * Writes a leb128 (INT-1), with no 0x00 tail.
+ *
+ * @param value its value
+ * @param[out] out where its octets go: room for 10
+ * @return the number of octets written, 1 to 10
+ */
+static size_t dots__leb128_write(uint64_t value, unsigned char *out) {
+  size_t size = 0;
+
+  while (value > 0x7F) {
+    out[size] = (unsigned char)((value & 0x7F) | 0x80);
+    ++size;
+    value >>= 7;
+  }
+  out[size] = (unsigned char)value;
+  return size + 1;
+}
+
+/**
+ * Encodes an event other than a chunk.
+ *
+ * @param event the event
+ * @param[out] out where its octets go: room for DOTS_WRITER_MAX
+ * @return the number of octets
+ */
+static size_t dots__encode(const struct dots_event *event, unsigned char *out) {
+  size_t size = 0;
+  size_t i;
+
+  switch (event->type) {
+  case DOTS_EVENT_HEADER:
+    for (i = 0; i < sizeof dots__fourcc; ++i) {
+      out[i] = dots__fourcc[i];
+    }
+    size = sizeof dots__fourcc;
+    size += dots__leb128_write(event->header.major, out + size);
+    size += dots__leb128_write(event->header.minor, out + size);
+    size += dots__leb128_write(event->header.update, out + size);
+    size += dots__leb128_write(event->header.flags, out + size);
+    size += dots__leb128_write(event->header.columns, out + size);
+    size += dots__leb128_write(event->header.rows, out + size);
+    size += dots__leb128_write(event->header.frame_rate, out + size);
+    break;
+  case DOTS_EVENT_FRAME:
+    if (event->clear) {
+      out[0] = DOTS__CLEAR;
+      size = 1;
+    }
+    break;
+  case DOTS_EVENT_RUN:
+    out[0] = DOTS__START_OF_RUN;
+    size = 1;
+    size += dots__leb128_write(event->run.x, out + size);
+    size += dots__leb128_write(event->run.y, out + size);
+    size += dots__leb128_write(event->run.count, out + size);
+    break;
+  case DOTS_EVENT_END_OF_BLOCKS:
+    out[0] = DOTS__END_OF_BLOCKS;
+    size = 1;
+    break;
+  case DOTS_EVENT_END_OF_TEXT:
+    out[0] = DOTS__END_OF_TEXT;
+    size = 1;
+    break;
+  case DOTS_EVENT_END_OF_STREAM:
+    out[0] = DOTS__END_OF_STREAM;
+    size = 1;
+    break;
+  case DOTS_EVENT_NONE:
+  case DOTS_EVENT_CHUNK:
+  case DOTS_EVENT_ERROR:
+    break; /* not reached: no such event is encoded */
+  }
+  return size;
+}
+
+/**
+ * Whether the stream written so far may go on with an event of the
+ * type of the event, in the layer it names.
+ *
+ * @param prv the writer's state
+ * @param event the event
+ * @return 1 if it may, otherwise 0
+ */
+static int dots__writer_allows(const struct dots__writer_prv *prv,
+                               const struct dots_event *event) {
+  enum dots__state state =
+      prv->frame ? DOTS__STATE_BLOCKS : prv->reader.prv.state;
+
+  switch (event->type) {
+  case DOTS_EVENT_HEADER:
+    return state == DOTS__STATE_FOURCC;
+  case DOTS_EVENT_FRAME:
+  case DOTS_EVENT_END_OF_STREAM:
+    return state == DOTS__STATE_FRAME;
+  case DOTS_EVENT_RUN:
+    return event->run.text ? state == DOTS__STATE_TEXT
+                           : state == DOTS__STATE_BLOCKS;
+  case DOTS_EVENT_CHUNK:
+    return state == DOTS__STATE_DATA;
+  case DOTS_EVENT_END_OF_BLOCKS:
+    return state == DOTS__STATE_BLOCKS;
+  case DOTS_EVENT_END_OF_TEXT:
+    return state == DOTS__STATE_TEXT;
+  case DOTS_EVENT_NONE:
+  case DOTS_EVENT_ERROR:
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Feeds octets to a reader, all of them unless it gives an error.
+ *
+ * @param reader the reader
+ * @param octets the octets
+ * @param size the number of octets
+ * @return DOTS_OK, or the code of the error
+ */
+static enum dots_code dots__check(struct dots_reader *reader,
+                                  const unsigned char *octets, size_t size) {
+  struct dots_event event;
+  size_t used = 0;
+
+  while (used < size) {
+    used += dots_reader_feed(reader, octets + used, size - used, &event);
+    if (event.type == DOTS_EVENT_ERROR) {
+      return event.code;
+    }
+  }
+  return DOTS_OK;
+}
+
+void dots_writer_init(struct dots_writer *writer) {
+  static const struct dots_writer initial = DOTS__ZERO;
+
+  *writer = initial;
+}
+
+struct dots_writer_result dots_writer_put(struct dots_writer *writer,
+                                          const struct dots_event *event,
+                                          unsigned char *out, size_t capacity) {
+  static const struct dots_writer_result none = DOTS__ZERO;
+  struct dots__writer_prv *prv = &writer->prv;
+  struct dots_writer_result result = none;
+  unsigned char encoded[DOTS_WRITER_MAX];
+  const unsigned char *octets = encoded;
+  struct dots_reader reader;
+  size_t size;
+  size_t i;
+
+  if (!dots__writer_allows(prv, event)) {
+    result.status = DOTS_WRITER_OUT_OF_ORDER;
+    return result;
+  }
+  if (event->type == DOTS_EVENT_CHUNK) {
+    if (event->chunk.size > prv->reader.prv.run.data_left) {
+      result.status = DOTS_WRITER_PAST_COUNT;
+      return result;
+    }
+    octets = event->chunk.octets;
+    size = event->chunk.size;
+  } else {
+    size = dots__encode(event, encoded);
+  }
+  if (size > capacity) {
+    result.status = DOTS_WRITER_NO_SPACE;
+    return result;
+  }
+  reader = prv->reader;
+  result.code = dots__check(&reader, octets, size);
+  if (result.code == DOTS_OK) {
+    result.code = dots__completable(&reader.prv);
+  }
+  if (result.code != DOTS_OK) {
+    result.status = DOTS_WRITER_ILL_FORMED;
+    return result;
+  }
+  prv->reader = reader;
+  prv->frame = event->type == DOTS_EVENT_FRAME && !event->clear;
+  for (i = 0; i < size; ++i) {
+    out[i] = octets[i];
+  }
+  result.size = size;
+  return result;
 }
 
 /**
