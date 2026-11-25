@@ -83,8 +83,9 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
   endif()
   add_test(NAME test_dots_cpp COMMAND test_dots_cpp)
 
-  # One test per case of the validation suite. A name that matches no
-  # test passes silently in greatest, so each must report one pass.
+  # The acceptance tests: one test per case of the validation suite.
+  # A name that matches no test passes silently in greatest, so each
+  # must report one pass.
   set(DOTS_SUITE ${CMAKE_CURRENT_SOURCE_DIR}/../spec/validation-suite)
   if(NOT EXISTS ${DOTS_SUITE}/README.md)
     message(FATAL_ERROR "spec/ is empty: run git submodule update --init")
@@ -95,8 +96,9 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
     file(RELATIVE_PATH case ${DOTS_SUITE} ${meta})
     string(REGEX REPLACE "\\.meta$" "" case ${case})
     string(APPEND DOTS_CASES "  \"${case}\",\n")
-    add_test(NAME suite/${case} COMMAND test_suite -e -t suite_${case})
-    set_tests_properties(suite/${case} PROPERTIES
+    add_test(NAME acceptance/${case}
+      COMMAND test_acceptance -e -t acceptance_${case})
+    set_tests_properties(acceptance/${case} PROPERTIES
       PASS_REGULAR_EXPRESSION "Pass: 1, fail: 0")
   endforeach()
   file(CONFIGURE OUTPUT suite.h CONTENT [[
@@ -104,7 +106,8 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
 static const char *const cases[] = {
 @DOTS_CASES@};
 ]] @ONLY)
-  dots_test(test_suite)
-  target_include_directories(test_suite PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-  target_link_libraries(test_suite PRIVATE tomlc17)
+  dots_test(test_acceptance)
+  target_include_directories(test_acceptance
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+  target_link_libraries(test_acceptance PRIVATE tomlc17)
 endif()
