@@ -59,3 +59,10 @@ build/test_unit                                               # all unit tests, 
 build/test_unit -e -s <suite>                                 # one suite
 build/test_unit_cpp                                           # all unit tests, in C++
 ```
+
+---
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-dark.png">
+  <img alt="Logo" src="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-light.png">
+</picture>

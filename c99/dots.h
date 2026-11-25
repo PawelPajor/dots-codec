@@ -24,6 +24,14 @@
 /**
  * @mainpage DOTS in C99
  *
+ * @htmlonly
+ * <picture>
+ *   <source media="(prefers-color-scheme: dark)"
+ *           srcset="dots-braille-dark.png">
+ *   <img alt="DOTS" src="dots-braille-light.png" style="max-width: 100%">
+ * </picture>
+ * @endhtmlonly
+ *
  * A reader and a writer of
  * [DOTS](https://github.com/PawelPajor/dots-stream) streams in one
  * header, dots.h: no dependencies, no allocation. See dots.h for how
