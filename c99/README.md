@@ -26,16 +26,26 @@ To configure without network access, after a first fetch, add
 `-DFETCHCONTENT_FULLY_DISCONNECTED=ON`.
 
 ```sh
-ctest --test-dir build             # run all tests
-ctest --test-dir build -N          # list them
-ctest --test-dir build -R <regex>  # run those whose names match
+ctest --test-dir build                   # all tests
+ctest --test-dir build -R '^acceptance/' # the acceptance tests
+ctest --test-dir build -R '^unit'        # the unit tests, in C and C++
+ctest --test-dir build -N                # list the tests
 ```
 
-The port is correct when every test passes. Configuring makes one
-acceptance test, `acceptance/<accept|reject>/<case>`, per case of the
-[validation suite](../spec/validation-suite/README.md). To run one
-under a debugger:
+The port is correct when every test passes.
+
+- Acceptance tests: one per case of the
+  [validation suite](../spec/validation-suite/README.md),
+  `acceptance/<accept|reject>/<case>`, made when configuring.
+- Unit tests: one per `SUITE` of `tests/test_unit.c` and language,
+  `unit/<suite>` and `unit-cpp/<suite>`.
+
+To run them without CTest, for instance under a debugger:
 
 ```sh
-build/test_acceptance -e -t acceptance_<accept|reject>/<case>
+build/test_acceptance                                         # all acceptance tests
+build/test_acceptance -e -t acceptance_<accept|reject>/<case> # one case
+build/test_unit                                               # all unit tests, in C
+build/test_unit -e -s <suite>                                 # one suite
+build/test_unit_cpp                                           # all unit tests, in C++
 ```

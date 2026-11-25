@@ -66,22 +66,35 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
     endif()
   endfunction()
 
-  dots_test(test_dots)
-  add_test(NAME test_dots COMMAND test_dots)
+  dots_test(test_unit)
 
   # The same tests in C++, where dots.h compiles too.
   enable_language(CXX)
-  add_executable(test_dots_cpp tests/test_dots_cpp.cpp)
-  target_link_libraries(test_dots_cpp PRIVATE dots::c99)
-  target_include_directories(test_dots_cpp PRIVATE ${greatest_SOURCE_DIR})
-  set_target_properties(test_dots_cpp PROPERTIES
+  add_executable(test_unit_cpp tests/test_unit_cpp.cpp)
+  target_link_libraries(test_unit_cpp PRIVATE dots::c99)
+  target_include_directories(test_unit_cpp PRIVATE ${greatest_SOURCE_DIR})
+  set_target_properties(test_unit_cpp PROPERTIES
     CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   if(MSVC)
-    target_compile_options(test_dots_cpp PRIVATE /W4 /WX)
+    target_compile_options(test_unit_cpp PRIVATE /W4 /WX)
   else()
-    target_compile_options(test_dots_cpp PRIVATE -Wall -Wextra -pedantic -Werror)
+    target_compile_options(test_unit_cpp PRIVATE -Wall -Wextra -pedantic -Werror)
   endif()
-  add_test(NAME test_dots_cpp COMMAND test_dots_cpp)
+
+  # The unit tests: one test per SUITE of tests/test_unit.c and
+  # language. A name that matches no suite passes silently in greatest,
+  # so each must report a pass.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    tests/test_unit.c)
+  file(STRINGS tests/test_unit.c DOTS_UNIT_SUITES
+    REGEX "^SUITE\\([a-z0-9_]+\\)")
+  foreach(suite IN LISTS DOTS_UNIT_SUITES)
+    string(REGEX REPLACE "^SUITE\\(([a-z0-9_]+)\\).*" "\\1" suite "${suite}")
+    add_test(NAME unit/${suite} COMMAND test_unit -e -s ${suite})
+    add_test(NAME unit-cpp/${suite} COMMAND test_unit_cpp -e -s ${suite})
+    set_tests_properties(unit/${suite} unit-cpp/${suite} PROPERTIES
+      PASS_REGULAR_EXPRESSION "Pass: [1-9][0-9]*, fail: 0")
+  endforeach()
 
   # The acceptance tests: one test per case of the validation suite.
   # A name that matches no test passes silently in greatest, so each
