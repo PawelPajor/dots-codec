@@ -19,6 +19,9 @@ cmake -S tests/package -B build-package -DCMAKE_PREFIX_PATH="$PWD/install" \
 
 ## Documentation
 
+The documentation of `dots.h`, from its Doxygen comments, is at
+<https://pawelpajor.github.io/dots-codec/c99/>, built from `main`.
+
 With [Doxygen](https://www.doxygen.nl) installed, `cmake --build build --target docs`
 writes the documentation of `dots.h` to `build/html/index.html`. A
 documentation error, such as a `@param` naming no parameter, fails
