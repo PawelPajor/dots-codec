@@ -41,13 +41,12 @@ Commit messages follow
 with the subject in the imperative mood. The scope is the port
 directory, and the type sets the version of that port:
 
-| Type    | Use                       | Version |
-|---------|---------------------------|---------|
-| `feat`  | New capability            | `minor` |
-| `fix`   | Correction                | `patch` |
-| `docs`  | Documentation             | none    |
-| `test`  | Tests only                | none    |
-| `chore` | Tooling, CI, housekeeping | none    |
+| Type       | Use                       | Version |
+|------------|---------------------------|---------|
+| `feat`     | New capability            | `minor` |
+| `fix`      | Correction                | `patch` |
+
+Other types of commits won't trigger  version change.
 
 A breaking change is marked with `!` after the type and raises
 `major`, or `minor` while `major` is 0.

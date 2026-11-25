@@ -3,7 +3,7 @@ SPDX-License-Identifier: MIT OR Apache-2.0
 Copyright (c) 2026 Pawel Pajor
 -->
 
-# cpp
+# cpp23
 
 C++23 port: header-only, standard library only, written from the specification.
 
@@ -12,7 +12,7 @@ C++23 port: header-only, standard library only, written from the specification.
 ```sh
 cmake -S . -B build                     # configure
 cmake --build build                     # build
-build/test_dots_cpp                     # run
+build/test_dots                         # run
 ctest --test-dir build                  # test
 cmake --install build --prefix install  # install
 cmake -S tests/package -B build-package -DCMAKE_PREFIX_PATH="$PWD/install" \

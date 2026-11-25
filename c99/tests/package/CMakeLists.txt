@@ -4,11 +4,11 @@
 # A project that uses the installed package, as a user would.
 
 cmake_minimum_required(VERSION 3.21)
-project(dots_package_test LANGUAGES CXX)
+project(dots_package_test LANGUAGES C)
 
-find_package(dots_stream_cpp REQUIRED)
+find_package(dots_stream_c99 REQUIRED)
 
 enable_testing()
-add_executable(package_test main.cpp)
-target_link_libraries(package_test PRIVATE dots::cpp)
+add_executable(package_test main.c)
+target_link_libraries(package_test PRIVATE dots::c99)
 add_test(NAME package_test COMMAND package_test)
