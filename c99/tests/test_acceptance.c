@@ -213,8 +213,8 @@ static const char *read_meta(const char *path, bool accept,
 
 /*
  * A surface file, or the frames composed from a stream, as code points:
- * one line per row, frames separated by an empty line. U+0020 is read
- * as U+2800: both stand for an empty cell.
+ * each frame's cells row by row, with no separators. U+0020 is read as
+ * U+2800: both stand for an empty cell.
  */
 struct surface {
   uint32_t points[MAX_POINTS];
@@ -237,9 +237,6 @@ static void add_frame(struct surface *surface, const struct dots_cell *cells,
   uint64_t x;
   uint64_t y;
 
-  if (surface->size > 0) {
-    add_point(surface, '\n');
-  }
   for (y = 0; y < header->rows; ++y) {
     for (x = 0; x < header->columns; ++x) {
       const struct dots_cell *cell = &cells[y * header->columns + x];
@@ -247,7 +244,6 @@ static void add_frame(struct surface *surface, const struct dots_cell *cells,
       add_point(surface, cell->character != 0 ? cell->character
                                               : dots_braille(cell->block));
     }
-    add_point(surface, '\n');
   }
 }
 
