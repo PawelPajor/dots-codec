@@ -86,7 +86,9 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
   set_target_properties(test_unit_cpp PROPERTIES
     CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   if(MSVC)
-    target_compile_options(test_unit_cpp PRIVATE /W4 /WX)
+    # C4551: greatest marks its functions used with (void)name.
+    target_compile_options(test_unit_cpp PRIVATE /W4 /WX /wd4551)
+    target_compile_definitions(test_unit_cpp PRIVATE _CRT_SECURE_NO_WARNINGS)
   else()
     target_compile_options(test_unit_cpp PRIVATE -Wall -Wextra -pedantic -Werror)
   endif()
