@@ -248,6 +248,84 @@ void dots_reader_finish(struct dots_reader *reader, struct dots_event *event);
 
 /** @} */
 
+/**
+ * @defgroup composer Composer
+ *
+ * Applies the events of a reader to the state of the grid (CMP-1 to
+ * CMP-3), in cells the caller provides. The composer allocates
+ * nothing. The surface of a cell is its character if it has one,
+ * otherwise its block, which dots_braille can show.
+ *
+ * @code
+ * struct dots_composer composer;
+ *
+ * on DOTS_EVENT_HEADER:
+ *   if (!dots_composer_init(&composer, &event.header, cells, count)) {
+ *     ... the grid has more cells than count ...
+ *   }
+ * on any other event:
+ *   dots_composer_apply(&composer, &event);
+ * on DOTS_EVENT_END_OF_TEXT:
+ *   ... cells hold the state left by the frame ...
+ * @endcode
+ *
+ * @{
+ */
+
+/** A cell of the state: cell (x, y) is at index y * columns + x. */
+struct dots_cell {
+  uint32_t character; /**< its character, or 0 if it has none */
+  unsigned char block;
+};
+
+/** The state of a composer: private, it may change at any time. */
+struct dots__composer_prv {
+  struct dots_cell *cells;
+  size_t columns;
+  size_t rows;
+  size_t next; /**< the index of the next cell of the run */
+  int text;    /**< the run is in the text layer */
+};
+
+/** A composer. */
+struct dots_composer {
+  struct dots__composer_prv prv; /**< private */
+};
+
+/**
+ * Starts composing a stream, from the initial state.
+ *
+ * @param composer the composer
+ * @param header the header of the stream
+ * @param cells the cells of the state
+ * @param count the number of cells at cells
+ * @return 1, or 0 if count is less than columns * rows
+ */
+int dots_composer_init(struct dots_composer *composer,
+                       const struct dots_header *header,
+                       struct dots_cell *cells, size_t count);
+
+/**
+ * Applies an event of the reader that read the header given to
+ * dots_composer_init. A frame with a clear and a chunk change the
+ * state, a run says where its chunks go, other events do nothing.
+ *
+ * @param composer the composer
+ * @param event the event
+ */
+void dots_composer_apply(struct dots_composer *composer,
+                         const struct dots_event *event);
+
+/**
+ * The Braille pattern of a block (Section 5 of dots-content.md).
+ *
+ * @param block a block
+ * @return its code point, from U+2800 to U+28FF
+ */
+uint32_t dots_braille(unsigned char block);
+
+/** @} */
+
 #ifdef __cplusplus
 }
 #endif
@@ -610,6 +688,48 @@ static size_t dots__read_blocks(struct dots__reader_prv *prv,
 }
 
 /**
+ * The length of a UTF-8 sequence, from its first octet (Section 4 of
+ * RFC 3629).
+ *
+ * @param lead the first octet
+ * @return the length, from 1 to 4, or 0 if no sequence starts with lead
+ */
+static unsigned dots__utf8_length(unsigned char lead) {
+  if (lead <= 0x7F) {
+    return 1;
+  }
+  if (lead >= 0xC2 && lead <= 0xDF) {
+    return 2;
+  }
+  if (lead >= 0xE0 && lead <= 0xEF) {
+    return 3;
+  }
+  if (lead >= 0xF0 && lead <= 0xF4) {
+    return 4;
+  }
+  return 0;
+}
+
+/**
+ * The character of a well-formed UTF-8 sequence.
+ *
+ * @param octets the sequence
+ * @param length its length, from 1 to 4, as dots__utf8_length gives it
+ * @return its Unicode scalar value
+ */
+static uint32_t dots__utf8_decode(const unsigned char *octets,
+                                  unsigned length) {
+  static const unsigned char lead_bits[4] = {0x7F, 0x1F, 0x0F, 0x07};
+  uint32_t character = octets[0] & lead_bits[length - 1];
+  unsigned i;
+
+  for (i = 1; i < length; ++i) {
+    character = character << 6 | (octets[i] & 0x3Fu);
+  }
+  return character;
+}
+
+/**
  * Adds one octet to a UTF-8 sequence, well-formed as in Section 4 of
  * RFC 3629 (DEC-3). After a complete sequence, the octet starts a new
  * one.
@@ -626,17 +746,9 @@ dots__utf8_push(struct dots__utf8 *utf8, unsigned char octet, uint64_t offset) {
 
   if (utf8->size == utf8->length) {
     utf8->size = 0;
-    utf8->length = 0;
+    utf8->length = dots__utf8_length(octet);
     utf8->offset = offset;
-    if (octet <= 0x7F) {
-      utf8->length = 1;
-    } else if (octet >= 0xC2 && octet <= 0xDF) {
-      utf8->length = 2;
-    } else if (octet >= 0xE0 && octet <= 0xEF) {
-      utf8->length = 3;
-    } else if (octet >= 0xF0 && octet <= 0xF4) {
-      utf8->length = 4;
-    } else {
+    if (utf8->length == 0) {
       return DOTS__UTF8_INVALID;
     }
   } else {
@@ -820,6 +932,126 @@ void dots_reader_finish(struct dots_reader *reader, struct dots_event *event) {
   event->type = DOTS_EVENT_ERROR;
   event->code = DOTS_TRUNCATED;
   event->offset = prv->offset;
+}
+
+/**
+ * Gives every cell the initial state: the block 0x00 and no character.
+ *
+ * @param prv the composer's state
+ */
+static void dots__clear(struct dots__composer_prv *prv) {
+  static const struct dots_cell initial = DOTS__ZERO;
+  size_t i;
+
+  for (i = 0; i < prv->columns * prv->rows; ++i) {
+    prv->cells[i] = initial;
+  }
+}
+
+/**
+ * Sets the blocks of a chunk (CMP-2).
+ *
+ * @param prv the composer's state
+ * @param chunk the chunk
+ */
+static void dots__compose_blocks(struct dots__composer_prv *prv,
+                                 const struct dots_chunk *chunk) {
+  size_t i;
+
+  for (i = 0; i < chunk->size && prv->next < prv->columns * prv->rows; ++i) {
+    prv->cells[prv->next].block = chunk->octets[i];
+    ++prv->next;
+  }
+}
+
+/**
+ * Sets the characters of a chunk, whole well-formed UTF-8 sequences
+ * (CMP-3). The eraser is 0, so setting it removes the character.
+ *
+ * @param prv the composer's state
+ * @param chunk the chunk
+ */
+static void dots__compose_text(struct dots__composer_prv *prv,
+                               const struct dots_chunk *chunk) {
+  size_t i = 0;
+
+  while (i < chunk->size && prv->next < prv->columns * prv->rows) {
+    unsigned length = dots__utf8_length(chunk->octets[i]);
+
+    if (length == 0 || length > chunk->size - i) {
+      return; /* not a chunk of the reader */
+    }
+    prv->cells[prv->next].character =
+        dots__utf8_decode(chunk->octets + i, length);
+    ++prv->next;
+    i += length;
+  }
+}
+
+int dots_composer_init(struct dots_composer *composer,
+                       const struct dots_header *header,
+                       struct dots_cell *cells, size_t count) {
+  struct dots__composer_prv *prv = &composer->prv;
+
+  if (header->rows != 0 && header->columns > count / header->rows) {
+    return 0;
+  }
+  prv->cells = cells;
+  prv->columns = (size_t)header->columns;
+  prv->rows = (size_t)header->rows;
+  prv->next = 0;
+  prv->text = 0;
+  dots__clear(prv);
+  return 1;
+}
+
+void dots_composer_apply(struct dots_composer *composer,
+                         const struct dots_event *event) {
+  struct dots__composer_prv *prv = &composer->prv;
+
+  switch (event->type) {
+  case DOTS_EVENT_FRAME:
+    if (event->clear) {
+      dots__clear(prv);
+    }
+    break;
+  case DOTS_EVENT_RUN:
+    prv->text = event->run.text;
+    if (event->run.x < prv->columns && event->run.y < prv->rows) {
+      prv->next = (size_t)event->run.y * prv->columns + (size_t)event->run.x;
+    } else {
+      prv->next = prv->columns * prv->rows; /* nothing to set */
+    }
+    break;
+  case DOTS_EVENT_CHUNK:
+    if (prv->text) {
+      dots__compose_text(prv, &event->chunk);
+    } else {
+      dots__compose_blocks(prv, &event->chunk);
+    }
+    break;
+  case DOTS_EVENT_NONE:
+  case DOTS_EVENT_HEADER:
+  case DOTS_EVENT_END_OF_BLOCKS:
+  case DOTS_EVENT_END_OF_TEXT:
+  case DOTS_EVENT_END_OF_STREAM:
+  case DOTS_EVENT_ERROR:
+    break;
+  }
+}
+
+uint32_t dots_braille(unsigned char block) {
+  static const unsigned char values[8] = {0x01, 0x08, 0x02, 0x10,
+                                          0x04, 0x20, 0x40, 0x80};
+  uint32_t pattern = 0x2800;
+  unsigned n;
+
+  for (n = 0; n < 8; ++n) {
+    if (block & 1u << n) {
+      pattern += values[n];
+    }
+  }
+  return pattern;
 }
 
 #endif /* DOTS_IMPLEMENTATION */

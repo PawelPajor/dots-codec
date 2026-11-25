@@ -28,6 +28,8 @@
 #include <string.h>
 
 #define MAX_OCTETS 4096
+#define MAX_CELLS 4096
+#define MAX_POINTS 16384
 
 /* What a reader shall produce for a case. */
 struct expected {
@@ -193,17 +195,105 @@ static const char *read_meta(const char *path, bool accept,
 }
 
 /*
- * Reads a stream in chunks of the given size. Gives the result of
- * dots_reader_finish, and the header if the reader gave one. Returns
- * false if the reader used no input and gave no event.
+ * A surface file, or the frames composed from a stream, as code points:
+ * one line per row, frames separated by an empty line. U+0020 is read
+ * as U+2800: both stand for an empty cell.
+ */
+struct surface {
+  uint32_t points[MAX_POINTS];
+  size_t size;
+  bool too_large; /* the grid or its frames do not fit this test */
+};
+
+static void add_point(struct surface *surface, uint32_t point) {
+  if (surface->size == MAX_POINTS) {
+    surface->too_large = true;
+    return;
+  }
+  surface->points[surface->size] = point == 0x20 ? 0x2800 : point;
+  ++surface->size;
+}
+
+/* Adds the surface of the state left by a frame. */
+static void add_frame(struct surface *surface, const struct dots_cell *cells,
+                      const struct dots_header *header) {
+  uint64_t x;
+  uint64_t y;
+
+  if (surface->size > 0) {
+    add_point(surface, '\n');
+  }
+  for (y = 0; y < header->rows; ++y) {
+    for (x = 0; x < header->columns; ++x) {
+      const struct dots_cell *cell = &cells[y * header->columns + x];
+
+      add_point(surface, cell->character != 0 ? cell->character
+                                              : dots_braille(cell->block));
+    }
+    add_point(surface, '\n');
+  }
+}
+
+/* Reads a .surface file; returns 0 on success, or what is wrong with it. */
+static const char *read_surface(const char *path, struct surface *surface) {
+  static unsigned char octets[4 * MAX_POINTS + 1];
+  FILE *file = fopen(path, "rb");
+  size_t size;
+  size_t i = 0;
+
+  if (file == 0) {
+    return "cannot open the .surface file";
+  }
+  size = fread(octets, 1, sizeof octets, file);
+  fclose(file);
+  if (size == sizeof octets) {
+    return "the .surface file is too long for this test";
+  }
+  surface->size = 0;
+  surface->too_large = false;
+  while (i < size) {
+    unsigned char lead = octets[i];
+    size_t length = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+    uint32_t point = length == 1   ? lead
+                     : length == 2 ? lead & 0x1Fu
+                     : length == 3 ? lead & 0x0Fu
+                                   : lead & 0x07u;
+    size_t k;
+
+    if (i + length > size) {
+      return "the .surface file is not UTF-8";
+    }
+    for (k = 1; k < length; ++k) {
+      if ((octets[i + k] & 0xC0) != 0x80) {
+        return "the .surface file is not UTF-8";
+      }
+      point = point << 6 | (octets[i + k] & 0x3Fu);
+    }
+    add_point(surface, point);
+    i += length;
+  }
+  return surface->too_large ? "the .surface file is too long for this test" : 0;
+}
+
+/*
+ * Reads a stream in chunks of the given size and composes its frames.
+ * Gives the result of dots_reader_finish, the header if the reader gave
+ * one, and the surface of each frame. Returns false if the reader used
+ * no input and gave no event.
  */
 static bool read_in_chunks(const unsigned char *octets, size_t size,
                            size_t chunk, struct dots_event *result,
-                           struct dots_header *header, bool *has_header) {
+                           struct dots_header *header, bool *has_header,
+                           struct surface *surface) {
+  static struct dots_cell cells[MAX_CELLS];
   struct dots_reader reader;
+  struct dots_composer composer;
+  bool composing = false;
   size_t at = 0;
 
   *has_header = false;
+  surface->size = 0;
+  surface->too_large = false;
   dots_reader_init(&reader);
   while (at < size) {
     size_t end = at + chunk < size ? at + chunk : size;
@@ -218,6 +308,13 @@ static bool read_in_chunks(const unsigned char *octets, size_t size,
       if (event.type == DOTS_EVENT_HEADER) {
         *header = event.header;
         *has_header = true;
+        composing = dots_composer_init(&composer, header, cells, MAX_CELLS);
+        surface->too_large = !composing;
+      } else if (composing) {
+        dots_composer_apply(&composer, &event);
+        if (event.type == DOTS_EVENT_END_OF_TEXT) {
+          add_frame(surface, cells, header);
+        }
       }
       if (event.type == DOTS_EVENT_ERROR) {
         at = size;
@@ -239,6 +336,8 @@ TEST acceptance(const char *name_of_case) {
   char path[1024];
   size_t size;
   size_t chunk;
+  static struct surface expected_surface;
+  static struct surface surface;
   struct expected expected;
   const char *error;
   bool accept = strncmp(name_of_case, "accept/", 7) == 0;
@@ -247,6 +346,11 @@ TEST acceptance(const char *name_of_case) {
   snprintf(path, sizeof path, "%s/%s.meta", DOTS_SUITE_DIR, name_of_case);
   error = read_meta(path, accept, &expected);
   ASSERT_FALSEm(error, error != 0);
+  if (accept) {
+    snprintf(path, sizeof path, "%s/%s.surface", DOTS_SUITE_DIR, name_of_case);
+    error = read_surface(path, &expected_surface);
+    ASSERT_FALSEm(error, error != 0);
+  }
 
   snprintf(path, sizeof path, "%s/%s.dots", DOTS_SUITE_DIR, name_of_case);
   file = fopen(path, "rb");
@@ -262,7 +366,8 @@ TEST acceptance(const char *name_of_case) {
 
     snprintf(message, sizeof message, "in chunks of %lu", (unsigned long)chunk);
     ASSERTm("the reader used no input and gave no event",
-            read_in_chunks(stream, size, chunk, &result, &header, &has_header));
+            read_in_chunks(stream, size, chunk, &result, &header, &has_header,
+                           &surface));
     ASSERTm("finishing gave neither the end of the stream nor an error",
             result.type == DOTS_EVENT_END_OF_STREAM ||
                 result.type == DOTS_EVENT_ERROR);
@@ -278,6 +383,12 @@ TEST acceptance(const char *name_of_case) {
       ASSERT_U64("columns", expected.header.columns, header.columns);
       ASSERT_U64("rows", expected.header.rows, header.rows);
       ASSERT_U64("frame-rate", expected.header.frame_rate, header.frame_rate);
+      ASSERTm("the grid or its frames are too large for this test",
+              !surface.too_large);
+      ASSERTm(message,
+              surface.size == expected_surface.size &&
+                  memcmp(surface.points, expected_surface.points,
+                         surface.size * sizeof surface.points[0]) == 0);
     } else {
       ASSERTm("a reject case read without an error",
               result.type == DOTS_EVENT_ERROR);

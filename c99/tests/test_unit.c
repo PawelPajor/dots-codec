@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT OR Apache-2.0
  * Copyright (c) 2026 Pawel Pajor
  *
- * The unit tests: one SUITE per unit, the reader and the internal
- * sub-APIs of dots.h.
+ * The unit tests: one SUITE per unit, the reader, the composer and
+ * the internal sub-APIs of dots.h.
  */
 
 #define DOTS_IMPLEMENTATION
@@ -278,43 +278,52 @@ SUITE(leb128) {
   RUN_TEST(leb128_in_a_row);
 }
 
-/* A UTF-8 sequence, what its last octet does to it, and its length. */
+/*
+ * A UTF-8 sequence, what its last octet does to it, its length and, if
+ * it is well-formed, its character.
+ */
 struct utf8_case {
   const char *name;
   unsigned char octets[4];
   size_t size;
   enum dots__utf8_result result;
   unsigned length; /* 0 for an invalid first octet */
+  uint32_t character;
 };
 
 static const struct utf8_case utf8_cases[] = {
-    {"one-octet-min", {0x00}, 1, DOTS__UTF8_DONE, 1},
-    {"one-octet-max", {0x7F}, 1, DOTS__UTF8_DONE, 1},
-    {"two-octets-min", {0xC2, 0x80}, 2, DOTS__UTF8_DONE, 2},
-    {"two-octets-max", {0xDF, 0xBF}, 2, DOTS__UTF8_DONE, 2},
-    {"e0-min", {0xE0, 0xA0, 0x80}, 3, DOTS__UTF8_DONE, 3},
-    {"euro", {0xE2, 0x82, 0xAC}, 3, DOTS__UTF8_DONE, 3},
-    {"before-surrogates", {0xED, 0x9F, 0xBF}, 3, DOTS__UTF8_DONE, 3},
-    {"after-surrogates", {0xEE, 0x80, 0x80}, 3, DOTS__UTF8_DONE, 3},
-    {"three-octets-max", {0xEF, 0xBF, 0xBF}, 3, DOTS__UTF8_DONE, 3},
-    {"f0-min", {0xF0, 0x90, 0x80, 0x80}, 4, DOTS__UTF8_DONE, 4},
-    {"f1", {0xF1, 0x80, 0x80, 0x80}, 4, DOTS__UTF8_DONE, 4},
-    {"four-octets-max", {0xF4, 0x8F, 0xBF, 0xBF}, 4, DOTS__UTF8_DONE, 4},
-    {"lead-80", {0x80}, 1, DOTS__UTF8_INVALID, 0},
-    {"lead-bf", {0xBF}, 1, DOTS__UTF8_INVALID, 0},
-    {"lead-c0", {0xC0}, 1, DOTS__UTF8_INVALID, 0},
-    {"lead-c1", {0xC1}, 1, DOTS__UTF8_INVALID, 0},
-    {"lead-f5", {0xF5}, 1, DOTS__UTF8_INVALID, 0},
-    {"lead-ff", {0xFF}, 1, DOTS__UTF8_INVALID, 0},
-    {"second-below-80", {0xC2, 0x7F}, 2, DOTS__UTF8_INVALID, 2},
-    {"second-above-bf", {0xC2, 0xC0}, 2, DOTS__UTF8_INVALID, 2},
-    {"e0-overlong", {0xE0, 0x9F}, 2, DOTS__UTF8_INVALID, 3},
-    {"surrogate", {0xED, 0xA0}, 2, DOTS__UTF8_INVALID, 3},
-    {"f0-overlong", {0xF0, 0x8F}, 2, DOTS__UTF8_INVALID, 4},
-    {"above-10ffff", {0xF4, 0x90}, 2, DOTS__UTF8_INVALID, 4},
-    {"third-octet", {0xE2, 0x82, 0x41}, 3, DOTS__UTF8_INVALID, 3},
-    {"fourth-octet", {0xF0, 0x90, 0x80, 0x41}, 4, DOTS__UTF8_INVALID, 4},
-    {"lead-after-lead", {0xE2, 0xE2}, 2, DOTS__UTF8_INVALID, 3}};
+    {"one-octet-min", {0x00}, 1, DOTS__UTF8_DONE, 1, 0},
+    {"one-octet-max", {0x7F}, 1, DOTS__UTF8_DONE, 1, 0x7F},
+    {"two-octets-min", {0xC2, 0x80}, 2, DOTS__UTF8_DONE, 2, 0x80},
+    {"two-octets-max", {0xDF, 0xBF}, 2, DOTS__UTF8_DONE, 2, 0x7FF},
+    {"e0-min", {0xE0, 0xA0, 0x80}, 3, DOTS__UTF8_DONE, 3, 0x800},
+    {"euro", {0xE2, 0x82, 0xAC}, 3, DOTS__UTF8_DONE, 3, 0x20AC},
+    {"before-surrogates", {0xED, 0x9F, 0xBF}, 3, DOTS__UTF8_DONE, 3, 0xD7FF},
+    {"after-surrogates", {0xEE, 0x80, 0x80}, 3, DOTS__UTF8_DONE, 3, 0xE000},
+    {"three-octets-max", {0xEF, 0xBF, 0xBF}, 3, DOTS__UTF8_DONE, 3, 0xFFFF},
+    {"f0-min", {0xF0, 0x90, 0x80, 0x80}, 4, DOTS__UTF8_DONE, 4, 0x10000},
+    {"f1", {0xF1, 0x80, 0x80, 0x80}, 4, DOTS__UTF8_DONE, 4, 0x40000},
+    {"four-octets-max",
+     {0xF4, 0x8F, 0xBF, 0xBF},
+     4,
+     DOTS__UTF8_DONE,
+     4,
+     0x10FFFF},
+    {"lead-80", {0x80}, 1, DOTS__UTF8_INVALID, 0, 0},
+    {"lead-bf", {0xBF}, 1, DOTS__UTF8_INVALID, 0, 0},
+    {"lead-c0", {0xC0}, 1, DOTS__UTF8_INVALID, 0, 0},
+    {"lead-c1", {0xC1}, 1, DOTS__UTF8_INVALID, 0, 0},
+    {"lead-f5", {0xF5}, 1, DOTS__UTF8_INVALID, 0, 0},
+    {"lead-ff", {0xFF}, 1, DOTS__UTF8_INVALID, 0, 0},
+    {"second-below-80", {0xC2, 0x7F}, 2, DOTS__UTF8_INVALID, 2, 0},
+    {"second-above-bf", {0xC2, 0xC0}, 2, DOTS__UTF8_INVALID, 2, 0},
+    {"e0-overlong", {0xE0, 0x9F}, 2, DOTS__UTF8_INVALID, 3, 0},
+    {"surrogate", {0xED, 0xA0}, 2, DOTS__UTF8_INVALID, 3, 0},
+    {"f0-overlong", {0xF0, 0x8F}, 2, DOTS__UTF8_INVALID, 4, 0},
+    {"above-10ffff", {0xF4, 0x90}, 2, DOTS__UTF8_INVALID, 4, 0},
+    {"third-octet", {0xE2, 0x82, 0x41}, 3, DOTS__UTF8_INVALID, 3, 0},
+    {"fourth-octet", {0xF0, 0x90, 0x80, 0x41}, 4, DOTS__UTF8_INVALID, 4, 0},
+    {"lead-after-lead", {0xE2, 0xE2}, 2, DOTS__UTF8_INVALID, 3, 0}};
 
 /*
  * Pushes a UTF-8 sequence at offset 1000, octet by octet. The octets
@@ -334,6 +343,9 @@ TEST utf8_push(const struct utf8_case *test) {
   ASSERT_EQ(test->length, utf8.length);
   ASSERT_EQ(kept, utf8.size);
   ASSERT_MEM_EQ(test->octets, utf8.octets, kept);
+  if (test->result == DOTS__UTF8_DONE) {
+    ASSERT_EQ(test->character, dots__utf8_decode(utf8.octets, utf8.length));
+  }
   PASS();
 }
 
@@ -362,6 +374,151 @@ SUITE(utf8) {
   RUN_TEST(utf8_in_a_row);
 }
 
+/*
+ * Reads a stream, in chunks of the given size, into a composer of
+ * count cells. Keeps the cell at index watched after each frame, up to
+ * 4 frames. Returns false if the reader gave an error or the composer
+ * refused the cells.
+ */
+static int compose(const unsigned char *stream, size_t size, size_t chunk,
+                   struct dots_cell *cells, size_t count, size_t watched,
+                   struct dots_cell after[4], size_t *frames) {
+  struct dots_reader reader;
+  struct dots_composer composer;
+  size_t at = 0;
+
+  *frames = 0;
+  dots_reader_init(&reader);
+  while (at < size) {
+    size_t end = at + chunk < size ? at + chunk : size;
+
+    while (at < end) {
+      struct dots_event event;
+      size_t used = dots_reader_feed(&reader, stream + at, end - at, &event);
+
+      if (event.type == DOTS_EVENT_ERROR) {
+        return 0;
+      }
+      if (event.type == DOTS_EVENT_HEADER) {
+        if (!dots_composer_init(&composer, &event.header, cells, count)) {
+          return 0;
+        }
+      } else {
+        dots_composer_apply(&composer, &event);
+      }
+      if (event.type == DOTS_EVENT_END_OF_TEXT && *frames < 4) {
+        after[*frames] = cells[watched];
+        ++*frames;
+      }
+      at += used;
+    }
+  }
+  return 1;
+}
+
+/*
+ * The example of Section 6 of dots-content.md, at cell (3, 0): a block,
+ * then a character, then the eraser, then a clear.
+ */
+TEST composer_example(void) {
+  static const unsigned char stream[] = {
+      0x64, 0x6F, 0x74, 0x73, 0x00, 0x01, 0x00, 0x01, 0x10, 0x04, 0x0A, 0x02,
+      0x03, 0x00, 0x01, 0xFF, 0xFE, 0x02, 0x03, 0x00, 0x01, 0x41, 0xFD, 0xFE,
+      0x02, 0x03, 0x00, 0x01, 0x00, 0xFD, 0x01, 0xFE, 0xFD, 0xFF};
+  struct dots_cell cells[64];
+  struct dots_cell after[4];
+  size_t frames;
+  size_t chunk;
+
+  for (chunk = 1; chunk <= sizeof stream; ++chunk) {
+    ASSERT(compose(stream, sizeof stream, chunk, cells, 64, 3, after, &frames));
+    ASSERT_EQ(3, frames);
+    ASSERT_EQ(0xFF, after[0].block);
+    ASSERT_EQ(0x41, after[0].character);
+    ASSERT_EQ(0xFF, after[1].block);
+    ASSERT_EQ(0, after[1].character);
+    ASSERT_EQ(0x00, after[2].block);
+    ASSERT_EQ(0, after[2].character);
+  }
+  PASS();
+}
+
+/* Characters of 2, 3 and 4 octets, at (0, 1) to (3, 1). */
+TEST composer_characters(void) {
+  static const unsigned char stream[] = {
+      0x64, 0x6F, 0x74, 0x73, 0x00, 0x01, 0x00, 0x01, 0x10, 0x04, 0x0A,
+      0xFE, 0x02, 0x00, 0x01, 0x0D, 0xC3, 0xA9, 0xE2, 0x82, 0xAC, 0xF0,
+      0x9F, 0x98, 0x80, 0xF4, 0x8F, 0xBF, 0xBF, 0xFD, 0xFF};
+  static const uint32_t characters[] = {0xE9, 0x20AC, 0x1F600, 0x10FFFF, 0};
+  struct dots_cell cells[64];
+  struct dots_cell after[4];
+  size_t frames;
+  size_t chunk;
+  size_t i;
+
+  for (chunk = 1; chunk <= sizeof stream; ++chunk) {
+    ASSERT(compose(stream, sizeof stream, chunk, cells, 64, 0, after, &frames));
+    for (i = 0; i < sizeof characters / sizeof characters[0]; ++i) {
+      ASSERT_EQ(characters[i], cells[16 + i].character);
+    }
+  }
+  PASS();
+}
+
+/* Too few cells are refused, and left as they are. */
+TEST composer_count(void) {
+  struct dots_header header = DOTS__ZERO;
+  struct dots_composer composer;
+  struct dots_cell cells[64];
+  size_t i;
+
+  for (i = 0; i < 64; ++i) {
+    cells[i].block = 0x55;
+    cells[i].character = 0x41;
+  }
+  header.columns = 16;
+  header.rows = 4;
+  ASSERT_FALSE(dots_composer_init(&composer, &header, cells, 63));
+  header.columns = UINT64_MAX;
+  header.rows = 2;
+  ASSERT_FALSE(dots_composer_init(&composer, &header, cells, SIZE_MAX));
+  header.columns = UINT64_C(1) << 32;
+  header.rows = UINT64_C(1) << 32;
+  ASSERT_FALSE(dots_composer_init(&composer, &header, cells, SIZE_MAX));
+  for (i = 0; i < 64; ++i) {
+    ASSERT_EQ(0x55, cells[i].block);
+    ASSERT_EQ(0x41, cells[i].character);
+  }
+  header.columns = 16;
+  header.rows = 4;
+  ASSERT(dots_composer_init(&composer, &header, cells, 64));
+  ASSERT_EQ(0x00, cells[63].block);
+  ASSERT_EQ(0, cells[63].character);
+  PASS();
+}
+
+/* Section 5 of dots-content.md: each bit, and its example 0x39. */
+TEST braille(void) {
+  static const uint32_t bits[8] = {0x2801, 0x2808, 0x2802, 0x2810,
+                                   0x2804, 0x2820, 0x2840, 0x2880};
+  unsigned n;
+
+  ASSERT_EQ(0x2800, dots_braille(0x00));
+  for (n = 0; n < 8; ++n) {
+    ASSERT_EQ(bits[n], dots_braille((unsigned char)(1u << n)));
+  }
+  ASSERT_EQ(0x2835, dots_braille(0x39));
+  ASSERT_EQ(0x28FF, dots_braille(0xFF));
+  PASS();
+}
+
+SUITE(composer) {
+  RUN_TEST(composer_example);
+  RUN_TEST(composer_characters);
+  RUN_TEST(composer_count);
+  RUN_TEST(braille);
+}
+
 GREATEST_MAIN_DEFS();
 
 int main(int argc, char **argv) {
@@ -369,5 +526,6 @@ int main(int argc, char **argv) {
   RUN_SUITE(reader);
   RUN_SUITE(leb128);
   RUN_SUITE(utf8);
+  RUN_SUITE(composer);
   GREATEST_MAIN_END();
 }
