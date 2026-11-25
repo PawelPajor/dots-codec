@@ -59,6 +59,66 @@ enum dots_code {
 const char *dots_code_name(enum dots_code code);
 
 /**
+ * @defgroup events Events
+ *
+ * The parts of a stream, in stream order: what the reader gives and
+ * the writer takes.
+ *
+ * @{
+ */
+
+/** The type of an event. */
+enum dots_event_type {
+  DOTS_EVENT_NONE,          /**< no event */
+  DOTS_EVENT_HEADER,        /**< the header: event.header */
+  DOTS_EVENT_FRAME,         /**< the start of a frame: event.clear */
+  DOTS_EVENT_RUN,           /**< the start of a run: event.run */
+  DOTS_EVENT_CHUNK,         /**< octets of the current run: event.chunk */
+  DOTS_EVENT_END_OF_BLOCKS, /**< the end of the block layer */
+  DOTS_EVENT_END_OF_TEXT,   /**< the end of the text layer and the frame */
+  DOTS_EVENT_END_OF_STREAM, /**< the end of the stream */
+  DOTS_EVENT_ERROR          /**< an error: event.code */
+};
+
+/** The header of a stream. */
+struct dots_header {
+  uint64_t major;
+  uint64_t minor;
+  uint64_t update;
+  uint64_t flags;
+  uint64_t columns;
+  uint64_t rows;
+  uint64_t frame_rate;
+};
+
+/** The start of a run. */
+struct dots_run {
+  int text; /**< 1 in the text layer, 0 in the block layer */
+  uint64_t x;
+  uint64_t y;
+  uint64_t count;
+};
+
+/** A piece of the data of the current run. */
+struct dots_chunk {
+  const unsigned char *octets;
+  size_t size;
+};
+
+/** An event. Its type says which members hold it. */
+struct dots_event {
+  enum dots_event_type type;
+  uint64_t offset; /**< the offset of the event, or of the error */
+  enum dots_code code;
+  int clear; /**< the frame starts with a clear */
+  struct dots_header header;
+  struct dots_run run;
+  struct dots_chunk chunk;
+};
+
+/** @} */
+
+/**
  * @defgroup reader Reader
  *
  * An incremental (push) parser. The caller feeds the stream in chunks
@@ -82,59 +142,6 @@ const char *dots_code_name(enum dots_code code);
  *
  * @{
  */
-
-/** The type of an event. */
-enum dots_event_type {
-  DOTS_EVENT_NONE,          /**< all input used, more needed */
-  DOTS_EVENT_HEADER,        /**< the header: event.header */
-  DOTS_EVENT_FRAME,         /**< the start of a frame: event.clear */
-  DOTS_EVENT_RUN,           /**< the start of a run: event.run */
-  DOTS_EVENT_CHUNK,         /**< octets of the current run: event.chunk */
-  DOTS_EVENT_END_OF_BLOCKS, /**< the end of the block layer */
-  DOTS_EVENT_END_OF_TEXT,   /**< the end of the text layer and the frame */
-  DOTS_EVENT_END_OF_STREAM, /**< the stream is well-formed */
-  DOTS_EVENT_ERROR          /**< the stream is not: event.code */
-};
-
-/** The header of a stream, decoded. */
-struct dots_header {
-  uint64_t major;
-  uint64_t minor;
-  uint64_t update;
-  uint64_t flags;
-  uint64_t columns;
-  uint64_t rows;
-  uint64_t frame_rate;
-};
-
-/** The start of a run. */
-struct dots_run {
-  int text; /**< 1 in the text layer, 0 in the block layer */
-  uint64_t x;
-  uint64_t y;
-  uint64_t count;
-};
-
-/**
- * A piece of the data of the current run. It points into the input of
- * the call or into the reader, and is valid until the next call. In
- * the text layer it holds only whole, well-formed UTF-8 sequences.
- */
-struct dots_chunk {
-  const unsigned char *octets;
-  size_t size;
-};
-
-/** An event of the reader. Its type says which members hold it. */
-struct dots_event {
-  enum dots_event_type type;
-  uint64_t offset; /**< the offset of the event, or of the error */
-  enum dots_code code;
-  int clear; /**< the frame starts with a clear */
-  struct dots_header header;
-  struct dots_run run;
-  struct dots_chunk chunk;
-};
 
 /** The states of a reader: the part of the stream it reads next. */
 enum dots__state {
@@ -166,7 +173,7 @@ struct dots__run {
 };
 
 /** A leb128, read one octet at a time. */
-struct dots__leb128 {
+struct dots__leb128_reader {
   uint64_t value;  /**< its value, so far */
   uint64_t offset; /**< its offset */
   unsigned shift;  /**< the shift of its next octet; 0 before its first */
@@ -174,11 +181,11 @@ struct dots__leb128 {
 };
 
 /** What an octet does to a leb128. */
-enum dots__leb128_result {
-  DOTS__LEB128_MORE,      /**< the leb128 continues */
-  DOTS__LEB128_DONE,      /**< the leb128 ends: its value is in value */
-  DOTS__LEB128_MALFORMED, /**< the octet is a 0x00 tail */
-  DOTS__LEB128_OVERFLOW   /**< the leb128 ends, above 2^64 - 1 */
+enum dots__leb128_reader_result {
+  DOTS__LEB128_READER_MORE,      /**< the leb128 continues */
+  DOTS__LEB128_READER_DONE,      /**< the leb128 ends: its value is in value */
+  DOTS__LEB128_READER_MALFORMED, /**< the octet is a 0x00 tail */
+  DOTS__LEB128_READER_OVERFLOW   /**< the leb128 ends, above 2^64 - 1 */
 };
 
 /**
@@ -205,7 +212,7 @@ struct dots__reader_prv {
   uint64_t offset;
   struct dots_header header;
   struct dots__run run;
-  struct dots__leb128 leb128;
+  struct dots__leb128_reader leb128;
   struct dots__utf8 utf8;
   struct dots_event error;
 };
@@ -223,9 +230,13 @@ struct dots_reader {
 void dots_reader_init(struct dots_reader *reader);
 
 /**
- * Reads the input up to the next event. After DOTS_EVENT_END_OF_STREAM
- * it uses all input and ignores it (STR-2). After DOTS_EVENT_ERROR it
- * uses nothing and gives the same error.
+ * Reads the input up to the next event. DOTS_EVENT_NONE means all
+ * input is used and more is needed. A chunk points into the input or
+ * into the reader, and is valid until the next call; in the text layer
+ * it holds only whole, well-formed UTF-8 sequences. After
+ * DOTS_EVENT_END_OF_STREAM, which means the stream is well-formed, it
+ * uses all input and ignores it (STR-2). After DOTS_EVENT_ERROR it uses
+ * nothing and gives the same error.
  *
  * @param reader the reader
  * @param data the next octets of the stream
@@ -378,11 +389,11 @@ const char *dots_code_name(enum dots_code code) {
  * @param offset the offset of the octet
  * @return what the octet does to the leb128
  */
-static enum dots__leb128_result dots__leb128_push(struct dots__leb128 *leb128,
-                                                  unsigned char octet,
-                                                  uint64_t offset) {
+static enum dots__leb128_reader_result
+dots__leb128_read(struct dots__leb128_reader *leb128, unsigned char octet,
+                  uint64_t offset) {
   uint64_t bits = octet & 0x7F;
-  enum dots__leb128_result result;
+  enum dots__leb128_reader_result result;
 
   if (leb128->shift == 0) {
     leb128->offset = offset;
@@ -401,12 +412,13 @@ static enum dots__leb128_result dots__leb128_push(struct dots__leb128 *leb128,
     if (leb128->shift < 64) {
       leb128->shift += 7;
     }
-    return DOTS__LEB128_MORE;
+    return DOTS__LEB128_READER_MORE;
   }
   if (octet == 0 && leb128->shift != 0) {
-    return DOTS__LEB128_MALFORMED;
+    return DOTS__LEB128_READER_MALFORMED;
   }
-  result = leb128->overflow ? DOTS__LEB128_OVERFLOW : DOTS__LEB128_DONE;
+  result = leb128->overflow ? DOTS__LEB128_READER_OVERFLOW
+                            : DOTS__LEB128_READER_DONE;
   leb128->shift = 0;
   return result;
 }
@@ -499,18 +511,18 @@ static size_t dots__read_fourcc(struct dots__reader_prv *prv,
  */
 static size_t dots__read_field(struct dots__reader_prv *prv,
                                unsigned char octet, struct dots_event *event) {
-  enum dots__leb128_result result =
-      dots__leb128_push(&prv->leb128, octet, prv->offset);
+  enum dots__leb128_reader_result result =
+      dots__leb128_read(&prv->leb128, octet, prv->offset);
   uint64_t value = prv->leb128.value;
 
-  if (result == DOTS__LEB128_MALFORMED) {
+  if (result == DOTS__LEB128_READER_MALFORMED) {
     return dots__fail(prv, DOTS_MALFORMED, prv->offset, event);
   }
-  if (result == DOTS__LEB128_OVERFLOW) {
+  if (result == DOTS__LEB128_READER_OVERFLOW) {
     return dots__fail(prv, DOTS_OVERFLOW, prv->leb128.offset, event);
   }
   ++prv->offset;
-  if (result == DOTS__LEB128_MORE) {
+  if (result == DOTS__LEB128_READER_MORE) {
     return 1;
   }
   switch (prv->state) {

@@ -187,70 +187,70 @@ struct leb128_case {
   const char *name;
   unsigned char octets[16];
   size_t size;
-  enum dots__leb128_result result;
-  uint64_t value; /* if result is DOTS__LEB128_DONE */
+  enum dots__leb128_reader_result result;
+  uint64_t value; /* if result is DOTS__LEB128_READER_DONE */
 };
 
 static const struct leb128_case leb128_cases[] = {
-    {"zero", {0x00}, 1, DOTS__LEB128_DONE, 0},
-    {"one-octet-max", {0x7F}, 1, DOTS__LEB128_DONE, 0x7F},
-    {"two-octets", {0x80, 0x01}, 2, DOTS__LEB128_DONE, 0x80},
-    {"three-octets", {0xE5, 0x8E, 0x26}, 3, DOTS__LEB128_DONE, 624485},
+    {"zero", {0x00}, 1, DOTS__LEB128_READER_DONE, 0},
+    {"one-octet-max", {0x7F}, 1, DOTS__LEB128_READER_DONE, 0x7F},
+    {"two-octets", {0x80, 0x01}, 2, DOTS__LEB128_READER_DONE, 0x80},
+    {"three-octets", {0xE5, 0x8E, 0x26}, 3, DOTS__LEB128_READER_DONE, 624485},
     {"zero-groups",
      {0x80, 0x80, 0x80, 0x01},
      4,
-     DOTS__LEB128_DONE,
+     DOTS__LEB128_READER_DONE,
      UINT64_C(1) << 21},
     {"bit-63",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01},
      10,
-     DOTS__LEB128_DONE,
+     DOTS__LEB128_READER_DONE,
      UINT64_C(1) << 63},
     {"max",
      {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01},
      10,
-     DOTS__LEB128_DONE,
+     DOTS__LEB128_READER_DONE,
      UINT64_MAX},
     {"bit-64",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02},
      10,
-     DOTS__LEB128_OVERFLOW,
+     DOTS__LEB128_READER_OVERFLOW,
      0},
     {"tenth-octet-max",
      {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F},
      10,
-     DOTS__LEB128_OVERFLOW,
+     DOTS__LEB128_READER_OVERFLOW,
      0},
     {"eleventh-octet",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01},
      11,
-     DOTS__LEB128_OVERFLOW,
+     DOTS__LEB128_READER_OVERFLOW,
      0},
-    {"zero-tail", {0x80, 0x00}, 2, DOTS__LEB128_MALFORMED, 0},
+    {"zero-tail", {0x80, 0x00}, 2, DOTS__LEB128_READER_MALFORMED, 0},
     {"zero-tail-past-tenth",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00},
      12,
-     DOTS__LEB128_MALFORMED,
+     DOTS__LEB128_READER_MALFORMED,
      0},
     {"zero-tail-after-overflow",
      {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x82, 0x00},
      11,
-     DOTS__LEB128_MALFORMED,
+     DOTS__LEB128_READER_MALFORMED,
      0}};
 
 /* Pushes a leb128 at offset 1000, octet by octet. */
 TEST leb128_push(const struct leb128_case *test) {
-  struct dots__leb128 leb128 = DOTS__ZERO;
+  struct dots__leb128_reader leb128 = DOTS__ZERO;
   size_t i;
 
   for (i = 0; i + 1 < test->size; ++i) {
-    ASSERT_EQ(DOTS__LEB128_MORE,
-              dots__leb128_push(&leb128, test->octets[i], 1000 + i));
+    ASSERT_EQ(DOTS__LEB128_READER_MORE,
+              dots__leb128_read(&leb128, test->octets[i], 1000 + i));
   }
   ASSERT_EQ(test->result,
-            dots__leb128_push(&leb128, test->octets[i], 1000 + i));
+            dots__leb128_read(&leb128, test->octets[i], 1000 + i));
   ASSERT_EQ(1000, leb128.offset);
-  if (test->result == DOTS__LEB128_DONE) {
+  if (test->result == DOTS__LEB128_READER_DONE) {
     ASSERT_EQ(test->value, leb128.value);
   }
   PASS();
@@ -258,11 +258,11 @@ TEST leb128_push(const struct leb128_case *test) {
 
 /* A leb128 after a complete one starts anew. */
 TEST leb128_in_a_row(void) {
-  struct dots__leb128 leb128 = DOTS__ZERO;
+  struct dots__leb128_reader leb128 = DOTS__ZERO;
 
-  ASSERT_EQ(DOTS__LEB128_MORE, dots__leb128_push(&leb128, 0x80, 0));
-  ASSERT_EQ(DOTS__LEB128_DONE, dots__leb128_push(&leb128, 0x01, 1));
-  ASSERT_EQ(DOTS__LEB128_DONE, dots__leb128_push(&leb128, 0x05, 2));
+  ASSERT_EQ(DOTS__LEB128_READER_MORE, dots__leb128_read(&leb128, 0x80, 0));
+  ASSERT_EQ(DOTS__LEB128_READER_DONE, dots__leb128_read(&leb128, 0x01, 1));
+  ASSERT_EQ(DOTS__LEB128_READER_DONE, dots__leb128_read(&leb128, 0x05, 2));
   ASSERT_EQ(2, leb128.offset);
   ASSERT_EQ(5, leb128.value);
   PASS();
