@@ -34,6 +34,12 @@ if(PROJECT_IS_TOP_LEVEL)
     set(DOXYGEN_WARN_IF_UNDOCUMENTED NO)
     set(DOXYGEN_WARN_AS_ERROR FAIL_ON_WARNINGS)
     set(DOXYGEN_GENERATE_LATEX NO)
+    # The logos of the specification; the main page picks the large one
+    # matching the theme.
+    set(DOTS_LOGO ${CMAKE_CURRENT_SOURCE_DIR}/../spec/logo)
+    set(DOXYGEN_PROJECT_LOGO ${DOTS_LOGO}/dots-pixels-dark.png)
+    set(DOXYGEN_HTML_EXTRA_FILES
+      ${DOTS_LOGO}/dots-braille-dark.png ${DOTS_LOGO}/dots-braille-light.png)
     doxygen_add_docs(docs dots.h)
   endif()
 endif()
