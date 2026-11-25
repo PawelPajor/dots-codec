@@ -65,3 +65,10 @@ Unless you explicitly state otherwise, any contribution you
 intentionally submit for inclusion in this repository, as defined in
 the Apache-2.0 licence, is dual-licensed as above, without any
 additional terms or conditions.
+
+---
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-dark.png">
+  <img alt="Logo" src="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-light.png">
+</picture>
