@@ -11,14 +11,18 @@
  * file, define DOTS_IMPLEMENTATION before including it. Both parts
  * compile as C++11 and later too.
  *
- * Names of the interface start with `dots_`, or `DOTS_` for macros and
- * constants.
+ * The interface has two levels. The event level, `dots_evt_`, gives
+ * and takes a stream event by event and allocates nothing. The model
+ * level, `dots_mdl_`, is built on it: it gives and takes whole frames,
+ * in memory from the caller. Names both levels share start with
+ * `dots_`. Macros and constants are in capitals: `DOTS_EVT_`,
+ * `DOTS_MDL_`, `DOTS_`.
  *
  * Names of the implementation start with `dots__` or `DOTS__`.
  * They are not part of the interface, and may change at any time.
  *
  * The private state of a struct `dots_x` is its member `prv`, of type
- * `struct dots_x_prv`.
+ * `struct dots__x_prv`.
  */
 
 /**
@@ -34,8 +38,11 @@
  *
  * A reader and a writer of
  * [DOTS](https://github.com/PawelPajor/dots-stream) streams in one
- * header, dots.h: no dependencies, no allocation. See dots.h for how
- * to include it.
+ * header, dots.h: no dependencies. See dots.h for how to include it.
+ *
+ * The @ref model "model level" reads and writes whole frames, with
+ * memory from the caller. The rest of this page is the event level,
+ * which allocates nothing.
  *
  * Both directions use the same @ref events "events": a header, then
  * frames, each a block layer and a text layer of runs, then the end of
@@ -52,23 +59,23 @@
  *    dots_braille.
  *
  * @code
- * dots_reader_init(&reader);
+ * dots_evt_reader_init(&reader);
  * while (size > 0) {
- *   size_t used = dots_reader_feed(&reader, data, size, &event);
+ *   size_t used = dots_evt_reader_feed(&reader, data, size, &event);
  *
  *   data += used;
  *   size -= used;
- *   if (event.type == DOTS_EVENT_HEADER) {
- *     dots_composer_init(&composer, &event.header, cells, count);
+ *   if (event.type == DOTS_EVT_EVENT_HEADER) {
+ *     dots_evt_composer_init(&composer, &event.header, cells, count);
  *   } else {
- *     dots_composer_apply(&composer, &event);
+ *     dots_evt_composer_apply(&composer, &event);
  *   }
- *   if (event.type == DOTS_EVENT_END_OF_TEXT) {
+ *   if (event.type == DOTS_EVT_EVENT_END_OF_TEXT) {
  *     ... show cells ...
  *   }
- *   ... stop on DOTS_EVENT_END_OF_STREAM or DOTS_EVENT_ERROR ...
+ *   ... stop on DOTS_EVT_EVENT_END_OF_STREAM or DOTS_EVT_EVENT_ERROR ...
  * }
- * dots_reader_finish(&reader, &event);
+ * dots_evt_reader_finish(&reader, &event);
  * @endcode
  *
  * To make a stream, give the same events in order to a
@@ -76,42 +83,42 @@
  * "Hi" at the top left of a grid of 16 x 4 cells:
  *
  * @code
- * static void put(const struct dots_event *event) {
- *   struct dots_writer_result result =
- *       dots_writer_put(&writer, event, out + size, sizeof out - size);
+ * static void put(const struct dots_evt_event *event) {
+ *   struct dots_evt_writer_result result =
+ *       dots_evt_writer_put(&writer, event, out + size, sizeof out - size);
  *
- *   ... stop unless result.status is DOTS_WRITER_OK ...
+ *   ... stop unless result.status is DOTS_EVT_WRITER_OK ...
  *   size += result.size;
  * }
  *
  * memset(&event, 0, sizeof event);
- * dots_writer_init(&writer);
- * event.type = DOTS_EVENT_HEADER;
- * event.header.major = DOTS_SPEC_MAJOR;
- * event.header.minor = DOTS_SPEC_MINOR;
+ * dots_evt_writer_init(&writer);
+ * event.type = DOTS_EVT_EVENT_HEADER;
+ * event.header.version.major = DOTS_SPEC_MAJOR;
+ * event.header.version.minor = DOTS_SPEC_MINOR;
  * event.header.flags = 1; // contains-text
- * event.header.columns = 16;
- * event.header.rows = 4;
+ * event.header.dimensions.x = 16;
+ * event.header.dimensions.y = 4;
  * event.header.frame_rate = 10;
  * put(&event);
- * event.type = DOTS_EVENT_FRAME;
+ * event.type = DOTS_EVT_EVENT_FRAME;
  * event.clear = 1;
  * put(&event);
- * event.type = DOTS_EVENT_END_OF_BLOCKS; // no blocks
+ * event.type = DOTS_EVT_EVENT_END_OF_BLOCKS; // no blocks
  * put(&event);
- * event.type = DOTS_EVENT_RUN;
+ * event.type = DOTS_EVT_EVENT_RUN;
  * event.run.text = 1;
  * event.run.x = 0;
  * event.run.y = 0;
  * event.run.count = 2;
  * put(&event);
- * event.type = DOTS_EVENT_CHUNK;
+ * event.type = DOTS_EVT_EVENT_CHUNK;
  * event.chunk.octets = (const unsigned char *)"Hi";
  * event.chunk.size = 2;
  * put(&event);
- * event.type = DOTS_EVENT_END_OF_TEXT;
+ * event.type = DOTS_EVT_EVENT_END_OF_TEXT;
  * put(&event);
- * event.type = DOTS_EVENT_END_OF_STREAM;
+ * event.type = DOTS_EVT_EVENT_END_OF_STREAM;
  * put(&event);
  * @endcode
  *
@@ -175,31 +182,45 @@ const char *dots_code_name(enum dots_code code);
  */
 
 /** The type of an event. */
-enum dots_event_type {
-  DOTS_EVENT_NONE,          /**< no event */
-  DOTS_EVENT_HEADER,        /**< the header: event.header */
-  DOTS_EVENT_FRAME,         /**< the start of a frame: event.clear */
-  DOTS_EVENT_RUN,           /**< the start of a run: event.run */
-  DOTS_EVENT_CHUNK,         /**< octets of the current run: event.chunk */
-  DOTS_EVENT_END_OF_BLOCKS, /**< the end of the block layer */
-  DOTS_EVENT_END_OF_TEXT,   /**< the end of the text layer and the frame */
-  DOTS_EVENT_END_OF_STREAM, /**< the end of the stream */
-  DOTS_EVENT_ERROR          /**< an error: event.code */
+enum dots_evt_event_type {
+  DOTS_EVT_EVENT_NONE,          /**< no event */
+  DOTS_EVT_EVENT_HEADER,        /**< the header: event.header */
+  DOTS_EVT_EVENT_FRAME,         /**< the start of a frame: event.clear */
+  DOTS_EVT_EVENT_RUN,           /**< the start of a run: event.run */
+  DOTS_EVT_EVENT_CHUNK,         /**< octets of the current run: event.chunk */
+  DOTS_EVT_EVENT_END_OF_BLOCKS, /**< the end of the block layer */
+  DOTS_EVT_EVENT_END_OF_TEXT,   /**< the end of the text layer and the frame */
+  DOTS_EVT_EVENT_END_OF_STREAM, /**< the end of the stream */
+  DOTS_EVT_EVENT_ERROR          /**< an error: event.code */
 };
 
-/** The header of a stream. */
-struct dots_header {
+/** A version (Section 4.3). */
+struct dots_version {
   uint64_t major;
   uint64_t minor;
   uint64_t update;
+};
+
+/** 2D coordinates (Section 4.4). */
+struct dots_coordinates {
+  uint64_t x;
+  uint64_t y;
+};
+
+/** The header of a stream (Section 5). */
+struct dots_header {
+  /**
+   * dots-version. Not named dots_version: in C++, a member named after
+   * its type changes the meaning of that name in the struct.
+   */
+  struct dots_version version;
   uint64_t flags;
-  uint64_t columns;
-  uint64_t rows;
+  struct dots_coordinates dimensions; /**< columns, rows */
   uint64_t frame_rate;
 };
 
 /** The start of a run. */
-struct dots_run {
+struct dots_evt_run {
   int text; /**< 1 in the text layer, 0 in the block layer */
   uint64_t x;
   uint64_t y;
@@ -207,20 +228,20 @@ struct dots_run {
 };
 
 /** A piece of the data of the current run. */
-struct dots_chunk {
+struct dots_evt_chunk {
   const unsigned char *octets;
   size_t size;
 };
 
 /** An event. Its type says which members hold it. */
-struct dots_event {
-  enum dots_event_type type;
+struct dots_evt_event {
+  enum dots_evt_event_type type;
   uint64_t offset; /**< the offset of the event, or of the error */
   enum dots_code code;
   int clear; /**< the frame starts with a clear */
   struct dots_header header;
-  struct dots_run run;
-  struct dots_chunk chunk;
+  struct dots_evt_run run;
+  struct dots_evt_chunk chunk;
 };
 
 /** @} */
@@ -233,18 +254,18 @@ struct dots_event {
  * allocates nothing and never holds the stream.
  *
  * @code
- * struct dots_reader reader;
- * struct dots_event event;
+ * struct dots_evt_reader reader;
+ * struct dots_evt_event event;
  *
- * dots_reader_init(&reader);
+ * dots_evt_reader_init(&reader);
  * while (size > 0) {
- *   size_t used = dots_reader_feed(&reader, data, size, &event);
+ *   size_t used = dots_evt_reader_feed(&reader, data, size, &event);
  *
  *   data += used;
  *   size -= used;
  *   ... handle event, stop on END_OF_STREAM or ERROR ...
  * }
- * dots_reader_finish(&reader, &event);   at the end of input
+ * dots_evt_reader_finish(&reader, &event);   at the end of input
  * @endcode
  *
  * @{
@@ -273,10 +294,10 @@ enum dots__state {
 
 /** The run being read. */
 struct dots__run {
-  struct dots_run head; /**< its layer, position and count */
-  uint64_t offset;      /**< its offset */
-  uint64_t data_left;   /**< its data octets not yet read */
-  uint64_t cells_left;  /**< the cells left in its row */
+  struct dots_evt_run head; /**< its layer, position and count */
+  uint64_t offset;          /**< its offset */
+  uint64_t data_left;       /**< its data octets not yet read */
+  uint64_t cells_left;      /**< the cells left in its row */
 };
 
 /** A leb128, read one octet at a time. */
@@ -314,19 +335,19 @@ enum dots__utf8_result {
 };
 
 /** The state of a reader: private, it may change at any time. */
-struct dots__reader_prv {
+struct dots__evt_reader_prv {
   enum dots__state state;
   uint64_t offset;
   struct dots_header header;
   struct dots__run run;
   struct dots__leb128_reader leb128;
   struct dots__utf8 utf8;
-  struct dots_event error;
+  struct dots_evt_event error;
 };
 
 /** A reader. */
-struct dots_reader {
-  struct dots__reader_prv prv; /**< private */
+struct dots_evt_reader {
+  struct dots__evt_reader_prv prv; /**< private */
 };
 
 /**
@@ -334,15 +355,15 @@ struct dots_reader {
  *
  * @param reader the reader
  */
-void dots_reader_init(struct dots_reader *reader);
+void dots_evt_reader_init(struct dots_evt_reader *reader);
 
 /**
- * Reads the input up to the next event. DOTS_EVENT_NONE means all
+ * Reads the input up to the next event. DOTS_EVT_EVENT_NONE means all
  * input is used and more is needed. A chunk points into the input or
  * into the reader, and is valid until the next call; in the text layer
  * it holds only whole, well-formed UTF-8 sequences. After
- * DOTS_EVENT_END_OF_STREAM, which means the stream is well-formed, it
- * uses all input and ignores it (STR-2). After DOTS_EVENT_ERROR it uses
+ * DOTS_EVT_EVENT_END_OF_STREAM, which means the stream is well-formed, it
+ * uses all input and ignores it (STR-2). After DOTS_EVT_EVENT_ERROR it uses
  * nothing and gives the same error.
  *
  * @param reader the reader
@@ -351,18 +372,20 @@ void dots_reader_init(struct dots_reader *reader);
  * @param[out] event the event
  * @return the number of octets used
  */
-size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
-                        size_t size, struct dots_event *event);
+size_t dots_evt_reader_feed(struct dots_evt_reader *reader,
+                            const unsigned char *data, size_t size,
+                            struct dots_evt_event *event);
 
 /**
- * Ends the input. Gives DOTS_EVENT_END_OF_STREAM if the stream ended,
+ * Ends the input. Gives DOTS_EVT_EVENT_END_OF_STREAM if the stream ended,
  * otherwise the error: TRUNCATED at the end of the stream, or the
  * error already found.
  *
  * @param reader the reader
  * @param[out] event the event
  */
-void dots_reader_finish(struct dots_reader *reader, struct dots_event *event);
+void dots_evt_reader_finish(struct dots_evt_reader *reader,
+                            struct dots_evt_event *event);
 
 /** @} */
 
@@ -375,46 +398,46 @@ void dots_reader_finish(struct dots_reader *reader, struct dots_event *event);
  * writer allocates nothing and never holds the stream.
  *
  * @code
- * struct dots_writer writer;
- * struct dots_writer_result result;
+ * struct dots_evt_writer writer;
+ * struct dots_evt_writer_result result;
  *
- * dots_writer_init(&writer);
+ * dots_evt_writer_init(&writer);
  * for each event, up to END_OF_STREAM:
- *   result = dots_writer_put(&writer, &event, out, capacity);
- *   ... on DOTS_WRITER_OK, out holds result.size octets of the stream ...
+ *   result = dots_evt_writer_put(&writer, &event, out, capacity);
+ *   ... on DOTS_EVT_WRITER_OK, out holds result.size octets of the stream ...
  * @endcode
  *
  * @{
  */
 
 /** The most octets an event other than a chunk is written as. */
-#define DOTS_WRITER_MAX 74
+#define DOTS_EVT_WRITER_MAX 74
 
 /** What the writer did with an event. */
-enum dots_writer_status {
-  DOTS_WRITER_OK,           /**< the event is written */
-  DOTS_WRITER_ILL_FORMED,   /**< it breaks a stream requirement: code */
-  DOTS_WRITER_OUT_OF_ORDER, /**< the stream has no such event next */
-  DOTS_WRITER_PAST_COUNT,   /**< a chunk past the count of its run */
-  DOTS_WRITER_NO_SPACE      /**< its octets do not fit the capacity */
+enum dots_evt_writer_status {
+  DOTS_EVT_WRITER_OK,           /**< the event is written */
+  DOTS_EVT_WRITER_ILL_FORMED,   /**< it breaks a stream requirement: code */
+  DOTS_EVT_WRITER_OUT_OF_ORDER, /**< the stream has no such event next */
+  DOTS_EVT_WRITER_PAST_COUNT,   /**< a chunk past the count of its run */
+  DOTS_EVT_WRITER_NO_SPACE      /**< its octets do not fit the capacity */
 };
 
 /** The result of a call of the writer. */
-struct dots_writer_result {
-  enum dots_writer_status status;
+struct dots_evt_writer_result {
+  enum dots_evt_writer_status status;
   enum dots_code code; /**< the code of the requirement, if ILL_FORMED */
   size_t size;         /**< the number of octets written */
 };
 
 /** The state of a writer: private, it may change at any time. */
-struct dots__writer_prv {
-  struct dots_reader reader; /**< has read every octet written */
+struct dots__evt_writer_prv {
+  struct dots_evt_reader reader; /**< has read every octet written */
   int frame; /**< a frame without a clear has started, none of it written */
 };
 
 /** A writer. */
-struct dots_writer {
-  struct dots__writer_prv prv; /**< private */
+struct dots_evt_writer {
+  struct dots__evt_writer_prv prv; /**< private */
 };
 
 /**
@@ -422,7 +445,7 @@ struct dots_writer {
  *
  * @param writer the writer
  */
-void dots_writer_init(struct dots_writer *writer);
+void dots_evt_writer_init(struct dots_evt_writer *writer);
 
 /**
  * Writes an event. A frame without a clear is written as nothing: its
@@ -437,13 +460,14 @@ void dots_writer_init(struct dots_writer *writer);
  * @param writer the writer
  * @param event the event
  * @param[out] out where its octets go
- * @param capacity the number of octets out holds: DOTS_WRITER_MAX for
+ * @param capacity the number of octets out holds: DOTS_EVT_WRITER_MAX for
  *        any event but a chunk, which needs its size
- * @return DOTS_WRITER_OK and the octets written, or a refusal
+ * @return DOTS_EVT_WRITER_OK and the octets written, or a refusal
  */
-struct dots_writer_result dots_writer_put(struct dots_writer *writer,
-                                          const struct dots_event *event,
-                                          unsigned char *out, size_t capacity);
+struct dots_evt_writer_result
+dots_evt_writer_put(struct dots_evt_writer *writer,
+                    const struct dots_evt_event *event, unsigned char *out,
+                    size_t capacity);
 
 /** @} */
 
@@ -456,15 +480,15 @@ struct dots_writer_result dots_writer_put(struct dots_writer *writer,
  * otherwise its block, which dots_braille can show.
  *
  * @code
- * struct dots_composer composer;
+ * struct dots_evt_composer composer;
  *
- * on DOTS_EVENT_HEADER:
- *   if (!dots_composer_init(&composer, &event.header, cells, count)) {
+ * on DOTS_EVT_EVENT_HEADER:
+ *   if (!dots_evt_composer_init(&composer, &event.header, cells, count)) {
  *     ... the grid has more cells than count ...
  *   }
  * on any other event:
- *   dots_composer_apply(&composer, &event);
- * on DOTS_EVENT_END_OF_TEXT:
+ *   dots_evt_composer_apply(&composer, &event);
+ * on DOTS_EVT_EVENT_END_OF_TEXT:
  *   ... cells hold the state left by the frame ...
  * @endcode
  *
@@ -478,7 +502,7 @@ struct dots_cell {
 };
 
 /** The state of a composer: private, it may change at any time. */
-struct dots__composer_prv {
+struct dots__evt_composer_prv {
   struct dots_cell *cells;
   size_t columns;
   size_t rows;
@@ -487,8 +511,8 @@ struct dots__composer_prv {
 };
 
 /** A composer. */
-struct dots_composer {
-  struct dots__composer_prv prv; /**< private */
+struct dots_evt_composer {
+  struct dots__evt_composer_prv prv; /**< private */
 };
 
 /**
@@ -500,20 +524,20 @@ struct dots_composer {
  * @param count the number of cells at cells
  * @return 1, or 0 if count is less than columns * rows
  */
-int dots_composer_init(struct dots_composer *composer,
-                       const struct dots_header *header,
-                       struct dots_cell *cells, size_t count);
+int dots_evt_composer_init(struct dots_evt_composer *composer,
+                           const struct dots_header *header,
+                           struct dots_cell *cells, size_t count);
 
 /**
  * Applies an event of the reader that read the header given to
- * dots_composer_init. A frame with a clear and a chunk change the
+ * dots_evt_composer_init. A frame with a clear and a chunk change the
  * state, a run says where its chunks go, other events do nothing.
  *
  * @param composer the composer
  * @param event the event
  */
-void dots_composer_apply(struct dots_composer *composer,
-                         const struct dots_event *event);
+void dots_evt_composer_apply(struct dots_evt_composer *composer,
+                             const struct dots_evt_event *event);
 
 /**
  * The Braille pattern of a block (Section 5 of dots-content.md).
@@ -522,6 +546,241 @@ void dots_composer_apply(struct dots_composer *composer,
  * @return its code point, from U+2800 to U+28FF
  */
 uint32_t dots_braille(unsigned char block);
+
+/** @} */
+
+/**
+ * @defgroup model Model
+ *
+ * Whole frames, one C type per ABNF rule, on top of the event level. A
+ * source reads a header and then frames from an input, in memory from
+ * an allocator. A sink writes a header and then frames to an output.
+ * A stream is a header and frames over time: it has no type.
+ *
+ * @code
+ * struct dots_mdl_allocator allocator = {malloc, free};
+ * struct dots_mdl_input input = {dots_mdl_stdio_get, in};
+ * struct dots_mdl_source source;
+ * struct dots_header header;
+ * struct dots_mdl_frame *frame;
+ *
+ * dots_mdl_open_source(&source, allocator, input, &header);
+ * while (dots_mdl_get_frame(&source, &frame).status == DOTS_MDL_OK) {
+ *   ... show frame ...
+ *   dots_mdl_release_frame(&source, frame);
+ * }
+ * @endcode
+ *
+ * A frame to write can live anywhere, the stack included:
+ *
+ * @code
+ * unsigned char text[] = "Hi";
+ * struct dots_mdl_run hi = {{0, 0}, 2, text, 0};
+ * struct dots_mdl_frame frame = {1, {0}, {&hi}}; // clear, no blocks, "Hi"
+ *
+ * dots_mdl_open_sink(&sink, output, &header);
+ * dots_mdl_put_frame(&sink, &frame);
+ * dots_mdl_close_sink(&sink); // end-of-stream
+ * @endcode
+ *
+ * Every call but dots_mdl_release_frame and dots_mdl_compose returns a
+ * result. Every status but DOTS_MDL_OK is final: each later call of the
+ * source or sink gives it again.
+ *
+ * @{
+ */
+
+/** A run: its data, one octet per block or UTF-8 text. */
+struct dots_mdl_run {
+  struct dots_coordinates position;
+  uint64_t count;
+  unsigned char *data;       /**< count octets, or 0 if count is 0 */
+  struct dots_mdl_run *next; /**< the next run of the layer, or 0 */
+};
+
+/** A block layer or a text layer: its end is the end of the list. */
+struct dots_mdl_layer {
+  struct dots_mdl_run *runs; /**< the first run, or 0 */
+};
+
+/** A frame. */
+struct dots_mdl_frame {
+  int clear; /**< the frame starts with a clear */
+  struct dots_mdl_layer blocks;
+  struct dots_mdl_layer text;
+};
+
+/**
+ * Where a source gets memory: functions with the signatures of malloc
+ * and free, which it may be given. Every piece is allocated once and
+ * never moves. free is given 0 too.
+ */
+struct dots_mdl_allocator {
+  void *(*allocate)(size_t size);
+  void (*free)(void *pointer);
+};
+
+/** The input has ended. */
+#define DOTS_MDL_IO_END -1
+
+/** The input or output failed. */
+#define DOTS_MDL_IO_ERROR -2
+
+/** Where a source gets its octets, one per call. */
+struct dots_mdl_input {
+  int (*get)(void *handle); /**< 0 to 255, DOTS_MDL_IO_END or _ERROR */
+  void *handle;
+};
+
+/** Where a sink puts its octets, one per call. */
+struct dots_mdl_output {
+  int (*put)(int octet, void *handle); /**< 0, or DOTS_MDL_IO_ERROR */
+  void *handle;
+};
+
+/**
+ * fgetc as a dots_mdl_input get. Defined with DOTS_IMPLEMENTATION only
+ * if DOTS_STDIO is defined too.
+ *
+ * @param handle a FILE *
+ * @return the octet, DOTS_MDL_IO_END or DOTS_MDL_IO_ERROR
+ */
+int dots_mdl_stdio_get(void *handle);
+
+/**
+ * fputc as a dots_mdl_output put. Defined with DOTS_IMPLEMENTATION only
+ * if DOTS_STDIO is defined too.
+ *
+ * @param octet the octet
+ * @param handle a FILE *
+ * @return 0, or DOTS_MDL_IO_ERROR
+ */
+int dots_mdl_stdio_put(int octet, void *handle);
+
+/** What a call of a source or a sink did. */
+enum dots_mdl_status {
+  DOTS_MDL_OK,          /**< done: a header or frame given, or written */
+  DOTS_MDL_END,         /**< get_frame: the stream has ended */
+  DOTS_MDL_ILL_FORMED,  /**< a stream requirement: code */
+  DOTS_MDL_NO_MEMORY,   /**< allocate gave 0, or a count above SIZE_MAX */
+  DOTS_MDL_IO_FAILED,   /**< get or put gave DOTS_MDL_IO_ERROR */
+  DOTS_MDL_OUT_OF_ORDER /**< a call after close_sink */
+};
+
+/** The result of a call of a source or a sink. */
+struct dots_mdl_result {
+  enum dots_mdl_status status;
+  enum dots_code code; /**< if ILL_FORMED */
+  uint64_t offset;     /**< if ILL_FORMED from a source */
+};
+
+/** No octet held: the reader has used the last octet from the input. */
+#define DOTS__MDL_NO_OCTET -1
+
+/** The state of a source: private, it may change at any time. */
+struct dots__mdl_source_prv {
+  struct dots_evt_reader reader;
+  struct dots_mdl_allocator allocator;
+  struct dots_mdl_input input;
+  int octet; /**< got, not yet used by the reader, or DOTS__MDL_NO_OCTET */
+  struct dots_mdl_result result; /**< OK, or the final result */
+};
+
+/** A source: reads frames. */
+struct dots_mdl_source {
+  struct dots__mdl_source_prv prv; /**< private */
+};
+
+/** The state of a sink: private, it may change at any time. */
+struct dots__mdl_sink_prv {
+  struct dots_evt_writer writer;
+  struct dots_mdl_output output;
+  struct dots_mdl_result result; /**< OK, or the final result */
+};
+
+/** A sink: writes frames. */
+struct dots_mdl_sink {
+  struct dots__mdl_sink_prv prv; /**< private */
+};
+
+/**
+ * Starts reading a stream, up to its header. It needs no close.
+ *
+ * @param source the source
+ * @param allocator where its frames get memory
+ * @param input where it gets octets
+ * @param[out] header the header, on DOTS_MDL_OK
+ * @return the result: ILL_FORMED with the reader's code and offset
+ */
+struct dots_mdl_result dots_mdl_open_source(struct dots_mdl_source *source,
+                                            struct dots_mdl_allocator allocator,
+                                            struct dots_mdl_input input,
+                                            struct dots_header *header);
+
+/**
+ * Reads the next frame, with every run. On DOTS_MDL_OK the caller owns
+ * the frame and releases it with dots_mdl_release_frame. On any other
+ * status there is no frame: the source frees what it had allocated. A
+ * count above what its row can hold is never allocated: the reader
+ * reports the error.
+ *
+ * @param source the source
+ * @param[out] frame the frame, or 0
+ * @return the result: END after the end of the stream
+ */
+struct dots_mdl_result dots_mdl_get_frame(struct dots_mdl_source *source,
+                                          struct dots_mdl_frame **frame);
+
+/**
+ * Frees a frame that dots_mdl_get_frame gave.
+ *
+ * @param source the source that gave it
+ * @param frame the frame, or 0
+ */
+void dots_mdl_release_frame(struct dots_mdl_source *source,
+                            struct dots_mdl_frame *frame);
+
+/**
+ * Starts writing a stream, with its header.
+ *
+ * @param sink the sink
+ * @param output where it puts octets
+ * @param header the header
+ * @return the result: ILL_FORMED with the writer's code
+ */
+struct dots_mdl_result dots_mdl_open_sink(struct dots_mdl_sink *sink,
+                                          struct dots_mdl_output output,
+                                          const struct dots_header *header);
+
+/**
+ * Writes a frame, giving it to the event writer event by event. A
+ * refused event may leave the frame partly written.
+ *
+ * @param sink the sink
+ * @param frame the frame
+ * @return the result: ILL_FORMED with the writer's code
+ */
+struct dots_mdl_result dots_mdl_put_frame(struct dots_mdl_sink *sink,
+                                          const struct dots_mdl_frame *frame);
+
+/**
+ * Ends the stream: writes end-of-stream. Every later call gives
+ * DOTS_MDL_OUT_OF_ORDER.
+ *
+ * @param sink the sink
+ * @return the result
+ */
+struct dots_mdl_result dots_mdl_close_sink(struct dots_mdl_sink *sink);
+
+/**
+ * Applies a frame to the state of the grid: replays it, in stream
+ * order, to the composer, whose cells the caller keeps across frames.
+ *
+ * @param composer the composer, started with the header of the stream
+ * @param frame a frame of the stream
+ */
+void dots_mdl_compose(struct dots_evt_composer *composer,
+                      const struct dots_mdl_frame *frame);
 
 /** @} */
 
@@ -632,10 +891,10 @@ static const unsigned char dots__fourcc[4] = {0x64, 0x6F, 0x74, 0x73};
  * @param[out] event the error
  * @return 0, the number of octets used
  */
-static size_t dots__fail(struct dots__reader_prv *prv, enum dots_code code,
-                         uint64_t offset, struct dots_event *event) {
+static size_t dots__fail(struct dots__evt_reader_prv *prv, enum dots_code code,
+                         uint64_t offset, struct dots_evt_event *event) {
   prv->state = DOTS__STATE_ERROR;
-  prv->error.type = DOTS_EVENT_ERROR;
+  prv->error.type = DOTS_EVT_EVENT_ERROR;
   prv->error.code = code;
   prv->error.offset = offset;
   *event = prv->error;
@@ -651,9 +910,9 @@ static size_t dots__fail(struct dots__reader_prv *prv, enum dots_code code,
  * @param[out] event the event
  * @return 1, the number of octets used
  */
-static size_t dots__token(struct dots__reader_prv *prv,
-                          enum dots_event_type type, enum dots__state next,
-                          struct dots_event *event) {
+static size_t dots__token(struct dots__evt_reader_prv *prv,
+                          enum dots_evt_event_type type, enum dots__state next,
+                          struct dots_evt_event *event) {
   event->type = type;
   event->offset = prv->offset;
   prv->state = next;
@@ -667,7 +926,7 @@ static size_t dots__token(struct dots__reader_prv *prv,
  * @param prv the reader's state
  * @return the state
  */
-static enum dots__state dots__layer(const struct dots__reader_prv *prv) {
+static enum dots__state dots__layer(const struct dots__evt_reader_prv *prv) {
   return prv->run.head.text ? DOTS__STATE_TEXT : DOTS__STATE_BLOCKS;
 }
 
@@ -679,8 +938,9 @@ static enum dots__state dots__layer(const struct dots__reader_prv *prv) {
  * @param[out] event the event, if any
  * @return the number of octets used: at least 1, or 0 with an event
  */
-static size_t dots__read_fourcc(struct dots__reader_prv *prv,
-                                unsigned char octet, struct dots_event *event) {
+static size_t dots__read_fourcc(struct dots__evt_reader_prv *prv,
+                                unsigned char octet,
+                                struct dots_evt_event *event) {
   if (octet != dots__fourcc[prv->offset]) {
     return dots__fail(prv, DOTS_MALFORMED, prv->offset, event);
   }
@@ -698,8 +958,9 @@ static size_t dots__read_fourcc(struct dots__reader_prv *prv,
  * @param[out] event the event, if any
  * @return the number of octets used: at least 1, or 0 with an event
  */
-static size_t dots__read_field(struct dots__reader_prv *prv,
-                               unsigned char octet, struct dots_event *event) {
+static size_t dots__read_field(struct dots__evt_reader_prv *prv,
+                               unsigned char octet,
+                               struct dots_evt_event *event) {
   enum dots__leb128_reader_result result =
       dots__leb128_read(&prv->leb128, octet, prv->offset);
   uint64_t value = prv->leb128.value;
@@ -720,7 +981,7 @@ static size_t dots__read_field(struct dots__reader_prv *prv,
       return dots__fail(prv, DOTS_UNSUPPORTED_VERSION, prv->leb128.offset,
                         event);
     }
-    prv->header.major = value;
+    prv->header.version.major = value;
     prv->state = DOTS__STATE_MINOR;
     break;
   case DOTS__STATE_MINOR:
@@ -728,11 +989,11 @@ static size_t dots__read_field(struct dots__reader_prv *prv,
       return dots__fail(prv, DOTS_UNSUPPORTED_VERSION, prv->leb128.offset,
                         event);
     }
-    prv->header.minor = value;
+    prv->header.version.minor = value;
     prv->state = DOTS__STATE_UPDATE;
     break;
   case DOTS__STATE_UPDATE:
-    prv->header.update = value;
+    prv->header.version.update = value;
     prv->state = DOTS__STATE_FLAGS;
     break;
   case DOTS__STATE_FLAGS:
@@ -746,33 +1007,33 @@ static size_t dots__read_field(struct dots__reader_prv *prv,
     if (value == 0) {
       return dots__fail(prv, DOTS_INVALID_VALUE, prv->leb128.offset, event);
     }
-    prv->header.columns = value;
+    prv->header.dimensions.x = value;
     prv->state = DOTS__STATE_ROWS;
     break;
   case DOTS__STATE_ROWS:
     if (value == 0) {
       return dots__fail(prv, DOTS_INVALID_VALUE, prv->leb128.offset, event);
     }
-    prv->header.rows = value;
+    prv->header.dimensions.y = value;
     prv->state = DOTS__STATE_FRAME_RATE;
     break;
   case DOTS__STATE_FRAME_RATE:
     prv->header.frame_rate = value;
     prv->state = DOTS__STATE_FRAME;
-    event->type = DOTS_EVENT_HEADER;
+    event->type = DOTS_EVT_EVENT_HEADER;
     event->offset = 0;
     event->header = prv->header;
     break;
   case DOTS__STATE_X:
-    if (value >= prv->header.columns) {
+    if (value >= prv->header.dimensions.x) {
       return dots__fail(prv, DOTS_OUTSIDE_GRID, prv->leb128.offset, event);
     }
     prv->run.head.x = value;
-    prv->run.cells_left = prv->header.columns - value;
+    prv->run.cells_left = prv->header.dimensions.x - value;
     prv->state = DOTS__STATE_Y;
     break;
   case DOTS__STATE_Y:
-    if (value >= prv->header.rows) {
+    if (value >= prv->header.dimensions.y) {
       return dots__fail(prv, DOTS_OUTSIDE_GRID, prv->leb128.offset, event);
     }
     prv->run.head.y = value;
@@ -782,7 +1043,7 @@ static size_t dots__read_field(struct dots__reader_prv *prv,
     prv->run.head.count = value;
     prv->run.data_left = value;
     prv->state = value == 0 ? dots__layer(prv) : DOTS__STATE_DATA;
-    event->type = DOTS_EVENT_RUN;
+    event->type = DOTS_EVT_EVENT_RUN;
     event->offset = prv->run.offset;
     event->run = prv->run.head;
     break;
@@ -807,19 +1068,21 @@ static size_t dots__read_field(struct dots__reader_prv *prv,
  * @param[out] event the event, if any
  * @return the number of octets used: at least 1, or 0 with an event
  */
-static size_t dots__read_frame(struct dots__reader_prv *prv,
-                               unsigned char octet, struct dots_event *event) {
+static size_t dots__read_frame(struct dots__evt_reader_prv *prv,
+                               unsigned char octet,
+                               struct dots_evt_event *event) {
   if (octet == DOTS__END_OF_STREAM) {
-    return dots__token(prv, DOTS_EVENT_END_OF_STREAM, DOTS__STATE_END, event);
+    return dots__token(prv, DOTS_EVT_EVENT_END_OF_STREAM, DOTS__STATE_END,
+                       event);
   }
   if (octet == DOTS__CLEAR) {
     event->clear = 1;
-    return dots__token(prv, DOTS_EVENT_FRAME, DOTS__STATE_BLOCKS, event);
+    return dots__token(prv, DOTS_EVT_EVENT_FRAME, DOTS__STATE_BLOCKS, event);
   }
   if (octet != DOTS__START_OF_RUN && octet != DOTS__END_OF_BLOCKS) {
     return dots__fail(prv, DOTS_MALFORMED, prv->offset, event);
   }
-  event->type = DOTS_EVENT_FRAME;
+  event->type = DOTS_EVT_EVENT_FRAME;
   event->offset = prv->offset;
   prv->state = DOTS__STATE_BLOCKS;
   return 0;
@@ -833,8 +1096,9 @@ static size_t dots__read_frame(struct dots__reader_prv *prv,
  * @param[out] event the event, if any
  * @return the number of octets used: at least 1, or 0 with an event
  */
-static size_t dots__read_layer(struct dots__reader_prv *prv,
-                               unsigned char octet, struct dots_event *event) {
+static size_t dots__read_layer(struct dots__evt_reader_prv *prv,
+                               unsigned char octet,
+                               struct dots_evt_event *event) {
   int text = prv->state == DOTS__STATE_TEXT;
 
   if (octet == DOTS__START_OF_RUN) {
@@ -848,10 +1112,12 @@ static size_t dots__read_layer(struct dots__reader_prv *prv,
     return 1;
   }
   if (!text && octet == DOTS__END_OF_BLOCKS) {
-    return dots__token(prv, DOTS_EVENT_END_OF_BLOCKS, DOTS__STATE_TEXT, event);
+    return dots__token(prv, DOTS_EVT_EVENT_END_OF_BLOCKS, DOTS__STATE_TEXT,
+                       event);
   }
   if (text && octet == DOTS__END_OF_TEXT) {
-    return dots__token(prv, DOTS_EVENT_END_OF_TEXT, DOTS__STATE_FRAME, event);
+    return dots__token(prv, DOTS_EVT_EVENT_END_OF_TEXT, DOTS__STATE_FRAME,
+                       event);
   }
   return dots__fail(prv, DOTS_MALFORMED, prv->offset, event);
 }
@@ -866,9 +1132,9 @@ static size_t dots__read_layer(struct dots__reader_prv *prv,
  * @param[out] event the event, if any
  * @return the number of octets used: at least 1, or 0 with an event
  */
-static size_t dots__read_blocks(struct dots__reader_prv *prv,
+static size_t dots__read_blocks(struct dots__evt_reader_prv *prv,
                                 const unsigned char *data, size_t size,
-                                struct dots_event *event) {
+                                struct dots_evt_event *event) {
   uint64_t limit = prv->run.data_left < prv->run.cells_left
                        ? prv->run.data_left
                        : prv->run.cells_left;
@@ -877,7 +1143,7 @@ static size_t dots__read_blocks(struct dots__reader_prv *prv,
   if (limit == 0) {
     return dots__fail(prv, DOTS_OUTSIDE_GRID, prv->offset, event);
   }
-  event->type = DOTS_EVENT_CHUNK;
+  event->type = DOTS_EVT_EVENT_CHUNK;
   event->offset = prv->offset;
   event->chunk.octets = data;
   event->chunk.size = used;
@@ -993,9 +1259,9 @@ dots__utf8_push(struct dots__utf8 *utf8, unsigned char octet, uint64_t offset) {
  * @param[out] event the event, if any
  * @return the number of octets used: at least 1, or 0 with an event
  */
-static size_t dots__read_text(struct dots__reader_prv *prv,
+static size_t dots__read_text(struct dots__evt_reader_prv *prv,
                               const unsigned char *data, size_t size,
-                              struct dots_event *event) {
+                              struct dots_evt_event *event) {
   size_t end = prv->run.data_left < size ? (size_t)prv->run.data_left : size;
   int carried = prv->utf8.size < prv->utf8.length;
   uint64_t start = prv->offset;
@@ -1042,7 +1308,7 @@ static size_t dots__read_text(struct dots__reader_prv *prv,
   if (whole == 0) {
     return used; /* no event: a sequence goes on past the input */
   }
-  event->type = DOTS_EVENT_CHUNK;
+  event->type = DOTS_EVT_EVENT_CHUNK;
   if (carried) {
     event->offset = prv->utf8.offset;
     event->chunk.octets = prv->utf8.octets;
@@ -1055,16 +1321,17 @@ static size_t dots__read_text(struct dots__reader_prv *prv,
   return used;
 }
 
-void dots_reader_init(struct dots_reader *reader) {
-  static const struct dots_reader initial = DOTS__ZERO;
+void dots_evt_reader_init(struct dots_evt_reader *reader) {
+  static const struct dots_evt_reader initial = DOTS__ZERO;
 
   *reader = initial;
 }
 
-size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
-                        size_t size, struct dots_event *event) {
-  static const struct dots_event none = DOTS__ZERO;
-  struct dots__reader_prv *prv = &reader->prv;
+size_t dots_evt_reader_feed(struct dots_evt_reader *reader,
+                            const unsigned char *data, size_t size,
+                            struct dots_evt_event *event) {
+  static const struct dots_evt_event none = DOTS__ZERO;
+  struct dots__evt_reader_prv *prv = &reader->prv;
   size_t used = 0;
 
   if (prv->state == DOTS__STATE_ERROR) {
@@ -1075,7 +1342,7 @@ size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
   if (prv->state == DOTS__STATE_END) {
     return size; /* STR-2 */
   }
-  while (used < size && event->type == DOTS_EVENT_NONE) {
+  while (used < size && event->type == DOTS_EVT_EVENT_NONE) {
     unsigned char octet = data[used];
 
     switch (prv->state) {
@@ -1116,9 +1383,10 @@ size_t dots_reader_feed(struct dots_reader *reader, const unsigned char *data,
   return used;
 }
 
-void dots_reader_finish(struct dots_reader *reader, struct dots_event *event) {
-  static const struct dots_event none = DOTS__ZERO;
-  struct dots__reader_prv *prv = &reader->prv;
+void dots_evt_reader_finish(struct dots_evt_reader *reader,
+                            struct dots_evt_event *event) {
+  static const struct dots_evt_event none = DOTS__ZERO;
+  struct dots__evt_reader_prv *prv = &reader->prv;
 
   if (prv->state == DOTS__STATE_ERROR) {
     *event = prv->error;
@@ -1126,11 +1394,11 @@ void dots_reader_finish(struct dots_reader *reader, struct dots_event *event) {
   }
   *event = none;
   if (prv->state == DOTS__STATE_END) {
-    event->type = DOTS_EVENT_END_OF_STREAM;
+    event->type = DOTS_EVT_EVENT_END_OF_STREAM;
     event->offset = prv->offset - 1; /* the end-of-stream token */
     return;
   }
-  event->type = DOTS_EVENT_ERROR;
+  event->type = DOTS_EVT_EVENT_ERROR;
   event->code = DOTS_TRUNCATED;
   event->offset = prv->offset;
 }
@@ -1158,55 +1426,56 @@ static size_t dots__leb128_write(uint64_t value, unsigned char *out) {
  * Encodes an event other than a chunk.
  *
  * @param event the event
- * @param[out] out where its octets go: room for DOTS_WRITER_MAX
+ * @param[out] out where its octets go: room for DOTS_EVT_WRITER_MAX
  * @return the number of octets
  */
-static size_t dots__encode(const struct dots_event *event, unsigned char *out) {
+static size_t dots__encode(const struct dots_evt_event *event,
+                           unsigned char *out) {
   size_t size = 0;
   size_t i;
 
   switch (event->type) {
-  case DOTS_EVENT_HEADER:
+  case DOTS_EVT_EVENT_HEADER:
     for (i = 0; i < sizeof dots__fourcc; ++i) {
       out[i] = dots__fourcc[i];
     }
     size = sizeof dots__fourcc;
-    size += dots__leb128_write(event->header.major, out + size);
-    size += dots__leb128_write(event->header.minor, out + size);
-    size += dots__leb128_write(event->header.update, out + size);
+    size += dots__leb128_write(event->header.version.major, out + size);
+    size += dots__leb128_write(event->header.version.minor, out + size);
+    size += dots__leb128_write(event->header.version.update, out + size);
     size += dots__leb128_write(event->header.flags, out + size);
-    size += dots__leb128_write(event->header.columns, out + size);
-    size += dots__leb128_write(event->header.rows, out + size);
+    size += dots__leb128_write(event->header.dimensions.x, out + size);
+    size += dots__leb128_write(event->header.dimensions.y, out + size);
     size += dots__leb128_write(event->header.frame_rate, out + size);
     break;
-  case DOTS_EVENT_FRAME:
+  case DOTS_EVT_EVENT_FRAME:
     if (event->clear) {
       out[0] = DOTS__CLEAR;
       size = 1;
     }
     break;
-  case DOTS_EVENT_RUN:
+  case DOTS_EVT_EVENT_RUN:
     out[0] = DOTS__START_OF_RUN;
     size = 1;
     size += dots__leb128_write(event->run.x, out + size);
     size += dots__leb128_write(event->run.y, out + size);
     size += dots__leb128_write(event->run.count, out + size);
     break;
-  case DOTS_EVENT_END_OF_BLOCKS:
+  case DOTS_EVT_EVENT_END_OF_BLOCKS:
     out[0] = DOTS__END_OF_BLOCKS;
     size = 1;
     break;
-  case DOTS_EVENT_END_OF_TEXT:
+  case DOTS_EVT_EVENT_END_OF_TEXT:
     out[0] = DOTS__END_OF_TEXT;
     size = 1;
     break;
-  case DOTS_EVENT_END_OF_STREAM:
+  case DOTS_EVT_EVENT_END_OF_STREAM:
     out[0] = DOTS__END_OF_STREAM;
     size = 1;
     break;
-  case DOTS_EVENT_NONE:
-  case DOTS_EVENT_CHUNK:
-  case DOTS_EVENT_ERROR:
+  case DOTS_EVT_EVENT_NONE:
+  case DOTS_EVT_EVENT_CHUNK:
+  case DOTS_EVT_EVENT_ERROR:
     break; /* not reached: no such event is encoded */
   }
   return size;
@@ -1220,28 +1489,28 @@ static size_t dots__encode(const struct dots_event *event, unsigned char *out) {
  * @param event the event
  * @return 1 if it may, otherwise 0
  */
-static int dots__writer_allows(const struct dots__writer_prv *prv,
-                               const struct dots_event *event) {
+static int dots__writer_allows(const struct dots__evt_writer_prv *prv,
+                               const struct dots_evt_event *event) {
   enum dots__state state =
       prv->frame ? DOTS__STATE_BLOCKS : prv->reader.prv.state;
 
   switch (event->type) {
-  case DOTS_EVENT_HEADER:
+  case DOTS_EVT_EVENT_HEADER:
     return state == DOTS__STATE_FOURCC;
-  case DOTS_EVENT_FRAME:
-  case DOTS_EVENT_END_OF_STREAM:
+  case DOTS_EVT_EVENT_FRAME:
+  case DOTS_EVT_EVENT_END_OF_STREAM:
     return state == DOTS__STATE_FRAME;
-  case DOTS_EVENT_RUN:
+  case DOTS_EVT_EVENT_RUN:
     return event->run.text ? state == DOTS__STATE_TEXT
                            : state == DOTS__STATE_BLOCKS;
-  case DOTS_EVENT_CHUNK:
+  case DOTS_EVT_EVENT_CHUNK:
     return state == DOTS__STATE_DATA;
-  case DOTS_EVENT_END_OF_BLOCKS:
+  case DOTS_EVT_EVENT_END_OF_BLOCKS:
     return state == DOTS__STATE_BLOCKS;
-  case DOTS_EVENT_END_OF_TEXT:
+  case DOTS_EVT_EVENT_END_OF_TEXT:
     return state == DOTS__STATE_TEXT;
-  case DOTS_EVENT_NONE:
-  case DOTS_EVENT_ERROR:
+  case DOTS_EVT_EVENT_NONE:
+  case DOTS_EVT_EVENT_ERROR:
     return 0;
   }
   return 0;
@@ -1255,14 +1524,14 @@ static int dots__writer_allows(const struct dots__writer_prv *prv,
  * @param size the number of octets
  * @return DOTS_OK, or the code of the error
  */
-static enum dots_code dots__check(struct dots_reader *reader,
+static enum dots_code dots__check(struct dots_evt_reader *reader,
                                   const unsigned char *octets, size_t size) {
-  struct dots_event event;
+  struct dots_evt_event event;
   size_t used = 0;
 
   while (used < size) {
-    used += dots_reader_feed(reader, octets + used, size - used, &event);
-    if (event.type == DOTS_EVENT_ERROR) {
+    used += dots_evt_reader_feed(reader, octets + used, size - used, &event);
+    if (event.type == DOTS_EVT_EVENT_ERROR) {
       return event.code;
     }
   }
@@ -1278,7 +1547,8 @@ static enum dots_code dots__check(struct dots_reader *reader,
  * @param prv the reader's state
  * @return DOTS_OK, or the code of the requirement no data can satisfy
  */
-static enum dots_code dots__completable(const struct dots__reader_prv *prv) {
+static enum dots_code
+dots__completable(const struct dots__evt_reader_prv *prv) {
   uint64_t data = prv->run.data_left;
   uint64_t cells = prv->run.cells_left;
 
@@ -1303,31 +1573,32 @@ static enum dots_code dots__completable(const struct dots__reader_prv *prv) {
   return data / 4 + (data % 4 != 0) <= cells ? DOTS_OK : DOTS_OUTSIDE_GRID;
 }
 
-void dots_writer_init(struct dots_writer *writer) {
-  static const struct dots_writer initial = DOTS__ZERO;
+void dots_evt_writer_init(struct dots_evt_writer *writer) {
+  static const struct dots_evt_writer initial = DOTS__ZERO;
 
   *writer = initial;
 }
 
-struct dots_writer_result dots_writer_put(struct dots_writer *writer,
-                                          const struct dots_event *event,
-                                          unsigned char *out, size_t capacity) {
-  static const struct dots_writer_result none = DOTS__ZERO;
-  struct dots__writer_prv *prv = &writer->prv;
-  struct dots_writer_result result = none;
-  unsigned char encoded[DOTS_WRITER_MAX];
+struct dots_evt_writer_result
+dots_evt_writer_put(struct dots_evt_writer *writer,
+                    const struct dots_evt_event *event, unsigned char *out,
+                    size_t capacity) {
+  static const struct dots_evt_writer_result none = DOTS__ZERO;
+  struct dots__evt_writer_prv *prv = &writer->prv;
+  struct dots_evt_writer_result result = none;
+  unsigned char encoded[DOTS_EVT_WRITER_MAX];
   const unsigned char *octets = encoded;
-  struct dots_reader reader;
+  struct dots_evt_reader reader;
   size_t size;
   size_t i;
 
   if (!dots__writer_allows(prv, event)) {
-    result.status = DOTS_WRITER_OUT_OF_ORDER;
+    result.status = DOTS_EVT_WRITER_OUT_OF_ORDER;
     return result;
   }
-  if (event->type == DOTS_EVENT_CHUNK) {
+  if (event->type == DOTS_EVT_EVENT_CHUNK) {
     if (event->chunk.size > prv->reader.prv.run.data_left) {
-      result.status = DOTS_WRITER_PAST_COUNT;
+      result.status = DOTS_EVT_WRITER_PAST_COUNT;
       return result;
     }
     octets = event->chunk.octets;
@@ -1336,7 +1607,7 @@ struct dots_writer_result dots_writer_put(struct dots_writer *writer,
     size = dots__encode(event, encoded);
   }
   if (size > capacity) {
-    result.status = DOTS_WRITER_NO_SPACE;
+    result.status = DOTS_EVT_WRITER_NO_SPACE;
     return result;
   }
   reader = prv->reader;
@@ -1345,11 +1616,11 @@ struct dots_writer_result dots_writer_put(struct dots_writer *writer,
     result.code = dots__completable(&reader.prv);
   }
   if (result.code != DOTS_OK) {
-    result.status = DOTS_WRITER_ILL_FORMED;
+    result.status = DOTS_EVT_WRITER_ILL_FORMED;
     return result;
   }
   prv->reader = reader;
-  prv->frame = event->type == DOTS_EVENT_FRAME && !event->clear;
+  prv->frame = event->type == DOTS_EVT_EVENT_FRAME && !event->clear;
   for (i = 0; i < size; ++i) {
     out[i] = octets[i];
   }
@@ -1362,7 +1633,7 @@ struct dots_writer_result dots_writer_put(struct dots_writer *writer,
  *
  * @param prv the composer's state
  */
-static void dots__clear(struct dots__composer_prv *prv) {
+static void dots__clear(struct dots__evt_composer_prv *prv) {
   static const struct dots_cell initial = DOTS__ZERO;
   size_t i;
 
@@ -1377,8 +1648,8 @@ static void dots__clear(struct dots__composer_prv *prv) {
  * @param prv the composer's state
  * @param chunk the chunk
  */
-static void dots__compose_blocks(struct dots__composer_prv *prv,
-                                 const struct dots_chunk *chunk) {
+static void dots__compose_blocks(struct dots__evt_composer_prv *prv,
+                                 const struct dots_evt_chunk *chunk) {
   size_t i;
 
   for (i = 0; i < chunk->size && prv->next < prv->columns * prv->rows; ++i) {
@@ -1394,8 +1665,8 @@ static void dots__compose_blocks(struct dots__composer_prv *prv,
  * @param prv the composer's state
  * @param chunk the chunk
  */
-static void dots__compose_text(struct dots__composer_prv *prv,
-                               const struct dots_chunk *chunk) {
+static void dots__compose_text(struct dots__evt_composer_prv *prv,
+                               const struct dots_evt_chunk *chunk) {
   size_t i = 0;
 
   while (i < chunk->size && prv->next < prv->columns * prv->rows) {
@@ -1411,34 +1682,35 @@ static void dots__compose_text(struct dots__composer_prv *prv,
   }
 }
 
-int dots_composer_init(struct dots_composer *composer,
-                       const struct dots_header *header,
-                       struct dots_cell *cells, size_t count) {
-  struct dots__composer_prv *prv = &composer->prv;
+int dots_evt_composer_init(struct dots_evt_composer *composer,
+                           const struct dots_header *header,
+                           struct dots_cell *cells, size_t count) {
+  struct dots__evt_composer_prv *prv = &composer->prv;
 
-  if (header->rows != 0 && header->columns > count / header->rows) {
+  if (header->dimensions.y != 0 &&
+      header->dimensions.x > count / header->dimensions.y) {
     return 0;
   }
   prv->cells = cells;
-  prv->columns = (size_t)header->columns;
-  prv->rows = (size_t)header->rows;
+  prv->columns = (size_t)header->dimensions.x;
+  prv->rows = (size_t)header->dimensions.y;
   prv->next = 0;
   prv->text = 0;
   dots__clear(prv);
   return 1;
 }
 
-void dots_composer_apply(struct dots_composer *composer,
-                         const struct dots_event *event) {
-  struct dots__composer_prv *prv = &composer->prv;
+void dots_evt_composer_apply(struct dots_evt_composer *composer,
+                             const struct dots_evt_event *event) {
+  struct dots__evt_composer_prv *prv = &composer->prv;
 
   switch (event->type) {
-  case DOTS_EVENT_FRAME:
+  case DOTS_EVT_EVENT_FRAME:
     if (event->clear) {
       dots__clear(prv);
     }
     break;
-  case DOTS_EVENT_RUN:
+  case DOTS_EVT_EVENT_RUN:
     prv->text = event->run.text;
     if (event->run.x < prv->columns && event->run.y < prv->rows) {
       prv->next = (size_t)event->run.y * prv->columns + (size_t)event->run.x;
@@ -1446,19 +1718,19 @@ void dots_composer_apply(struct dots_composer *composer,
       prv->next = prv->columns * prv->rows; /* nothing to set */
     }
     break;
-  case DOTS_EVENT_CHUNK:
+  case DOTS_EVT_EVENT_CHUNK:
     if (prv->text) {
       dots__compose_text(prv, &event->chunk);
     } else {
       dots__compose_blocks(prv, &event->chunk);
     }
     break;
-  case DOTS_EVENT_NONE:
-  case DOTS_EVENT_HEADER:
-  case DOTS_EVENT_END_OF_BLOCKS:
-  case DOTS_EVENT_END_OF_TEXT:
-  case DOTS_EVENT_END_OF_STREAM:
-  case DOTS_EVENT_ERROR:
+  case DOTS_EVT_EVENT_NONE:
+  case DOTS_EVT_EVENT_HEADER:
+  case DOTS_EVT_EVENT_END_OF_BLOCKS:
+  case DOTS_EVT_EVENT_END_OF_TEXT:
+  case DOTS_EVT_EVENT_END_OF_STREAM:
+  case DOTS_EVT_EVENT_ERROR:
     break;
   }
 }
@@ -1475,6 +1747,427 @@ uint32_t dots_braille(unsigned char block) {
     }
   }
   return pattern;
+}
+
+#ifdef DOTS_STDIO
+#include <stdio.h>
+
+int dots_mdl_stdio_get(void *handle) {
+  FILE *file = (FILE *)handle;
+  int c = fgetc(file);
+
+  if (c == EOF) {
+    return ferror(file) ? DOTS_MDL_IO_ERROR : DOTS_MDL_IO_END;
+  }
+  return c;
+}
+
+int dots_mdl_stdio_put(int octet, void *handle) {
+  return fputc(octet, (FILE *)handle) == EOF ? DOTS_MDL_IO_ERROR : 0;
+}
+#endif /* DOTS_STDIO */
+
+/**
+ * A result with a status only.
+ *
+ * @param status the status
+ * @return the result
+ */
+static struct dots_mdl_result dots__mdl_result(enum dots_mdl_status status) {
+  struct dots_mdl_result result = DOTS__ZERO;
+
+  result.status = status;
+  return result;
+}
+
+/**
+ * Reads the next event, getting octets from the input as the reader
+ * needs them.
+ *
+ * @param prv the source's state
+ * @param[out] event the event, on DOTS_MDL_OK: never an error
+ * @return the result: ILL_FORMED for an error of the reader
+ */
+static struct dots_mdl_result dots__mdl_next(struct dots__mdl_source_prv *prv,
+                                             struct dots_evt_event *event) {
+  struct dots_mdl_result result = dots__mdl_result(DOTS_MDL_OK);
+
+  do {
+    if (prv->octet == DOTS__MDL_NO_OCTET) {
+      int got = prv->input.get(prv->input.handle);
+
+      if (got == DOTS_MDL_IO_END) {
+        dots_evt_reader_finish(&prv->reader, event);
+        break;
+      }
+      if (got < 0 || got > 0xFF) {
+        result.status = DOTS_MDL_IO_FAILED;
+        return result;
+      }
+      prv->octet = got;
+    }
+    {
+      unsigned char octet = (unsigned char)prv->octet;
+
+      if (dots_evt_reader_feed(&prv->reader, &octet, 1, event) == 1) {
+        prv->octet = DOTS__MDL_NO_OCTET;
+      }
+    }
+  } while (event->type == DOTS_EVT_EVENT_NONE);
+  if (event->type == DOTS_EVT_EVENT_ERROR) {
+    result.status = DOTS_MDL_ILL_FORMED;
+    result.code = event->code;
+    result.offset = event->offset;
+  }
+  return result;
+}
+
+/**
+ * Frees the runs of a list.
+ *
+ * @param run the first run, or 0
+ * @param release the free of the allocator
+ */
+static void dots__release_runs(struct dots_mdl_run *run,
+                               void (*release)(void *)) {
+  while (run != 0) {
+    struct dots_mdl_run *next = run->next;
+
+    release(run->data);
+    release(run);
+    run = next;
+  }
+}
+
+/**
+ * Allocates a run, unless its count is above what its row can hold
+ * (DEC-5): then the reader reports the error, and the run is 0.
+ *
+ * @param prv the source's state
+ * @param head the start of the run
+ * @param[out] run the run, its data not yet read, or 0
+ * @return the result: NO_MEMORY or OK
+ */
+static struct dots_mdl_result
+dots__mdl_new_run(struct dots__mdl_source_prv *prv,
+                  const struct dots_evt_run *head, struct dots_mdl_run **run) {
+  uint64_t cells = prv->reader.prv.header.dimensions.x - head->x;
+  uint64_t count = head->count;
+  int fits =
+      head->text ? count / 4 + (count % 4 != 0) <= cells : count <= cells;
+  struct dots_mdl_run *made;
+
+  *run = 0;
+  if (!fits) {
+    return dots__mdl_result(DOTS_MDL_OK);
+  }
+  if ((uint64_t)(size_t)count != count) {
+    return dots__mdl_result(DOTS_MDL_NO_MEMORY);
+  }
+  made = (struct dots_mdl_run *)prv->allocator.allocate(sizeof *made);
+  if (made == 0) {
+    return dots__mdl_result(DOTS_MDL_NO_MEMORY);
+  }
+  made->position.x = head->x;
+  made->position.y = head->y;
+  made->count = count;
+  made->data = 0;
+  made->next = 0;
+  if (count > 0) {
+    made->data = (unsigned char *)prv->allocator.allocate((size_t)count);
+    if (made->data == 0) {
+      prv->allocator.free(made);
+      return dots__mdl_result(DOTS_MDL_NO_MEMORY);
+    }
+  }
+  *run = made;
+  return dots__mdl_result(DOTS_MDL_OK);
+}
+
+/**
+ * Reads a frame after its start, up to its end of text.
+ *
+ * @param prv the source's state
+ * @param clear the frame starts with a clear
+ * @param[out] frame the frame, on DOTS_MDL_OK
+ * @return the result: on any status but OK, nothing is left allocated
+ */
+static struct dots_mdl_result
+dots__mdl_read_frame(struct dots__mdl_source_prv *prv, int clear,
+                     struct dots_mdl_frame **frame) {
+  struct dots_mdl_frame *made =
+      (struct dots_mdl_frame *)prv->allocator.allocate(sizeof *made);
+  struct dots_mdl_run **tail;
+  struct dots_mdl_run *run = 0; /* the run read, or 0 to drop its data */
+  size_t filled = 0;
+  struct dots_evt_event event;
+  struct dots_mdl_result result;
+
+  if (made == 0) {
+    return dots__mdl_result(DOTS_MDL_NO_MEMORY);
+  }
+  made->clear = clear;
+  made->blocks.runs = 0;
+  made->text.runs = 0;
+  tail = &made->blocks.runs;
+  for (;;) {
+    result = dots__mdl_next(prv, &event);
+    if (result.status != DOTS_MDL_OK) {
+      break;
+    }
+    if (event.type == DOTS_EVT_EVENT_END_OF_TEXT) {
+      *frame = made;
+      return result;
+    }
+    if (event.type == DOTS_EVT_EVENT_END_OF_BLOCKS) {
+      tail = &made->text.runs;
+    } else if (event.type == DOTS_EVT_EVENT_RUN) {
+      result = dots__mdl_new_run(prv, &event.run, &run);
+      if (result.status != DOTS_MDL_OK) {
+        break;
+      }
+      if (run != 0) {
+        *tail = run;
+        tail = &run->next;
+      }
+      filled = 0;
+    } else if (event.type == DOTS_EVT_EVENT_CHUNK && run != 0) {
+      size_t i;
+
+      for (i = 0; i < event.chunk.size; ++i) {
+        run->data[filled + i] = event.chunk.octets[i];
+      }
+      filled += event.chunk.size;
+    }
+  }
+  dots__release_runs(made->blocks.runs, prv->allocator.free);
+  dots__release_runs(made->text.runs, prv->allocator.free);
+  prv->allocator.free(made);
+  return result;
+}
+
+struct dots_mdl_result dots_mdl_open_source(struct dots_mdl_source *source,
+                                            struct dots_mdl_allocator allocator,
+                                            struct dots_mdl_input input,
+                                            struct dots_header *header) {
+  struct dots__mdl_source_prv *prv = &source->prv;
+  struct dots_evt_event event;
+
+  dots_evt_reader_init(&prv->reader);
+  prv->allocator = allocator;
+  prv->input = input;
+  prv->octet = DOTS__MDL_NO_OCTET;
+  prv->result = dots__mdl_next(prv, &event);
+  if (prv->result.status != DOTS_MDL_OK) {
+    return prv->result;
+  }
+  *header = event.header; /* the reader gives the header or an error first */
+  return prv->result;
+}
+
+struct dots_mdl_result dots_mdl_get_frame(struct dots_mdl_source *source,
+                                          struct dots_mdl_frame **frame) {
+  struct dots__mdl_source_prv *prv = &source->prv;
+  struct dots_evt_event event;
+  struct dots_mdl_result result;
+
+  *frame = 0;
+  if (prv->result.status != DOTS_MDL_OK) {
+    return prv->result;
+  }
+  result = dots__mdl_next(prv, &event);
+  if (result.status == DOTS_MDL_OK) {
+    if (event.type == DOTS_EVT_EVENT_END_OF_STREAM) {
+      result.status = DOTS_MDL_END;
+    } else { /* the start of a frame */
+      result = dots__mdl_read_frame(prv, event.clear, frame);
+    }
+  }
+  prv->result = result.status == DOTS_MDL_OK ? prv->result : result;
+  return result;
+}
+
+void dots_mdl_release_frame(struct dots_mdl_source *source,
+                            struct dots_mdl_frame *frame) {
+  void (*release)(void *) = source->prv.allocator.free;
+
+  if (frame == 0) {
+    return;
+  }
+  dots__release_runs(frame->blocks.runs, release);
+  dots__release_runs(frame->text.runs, release);
+  release(frame);
+}
+
+/**
+ * Writes an event and puts its octets.
+ *
+ * @param prv the sink's state
+ * @param event the event: a chunk of at most DOTS_EVT_WRITER_MAX octets
+ * @return the result: ILL_FORMED with the writer's code
+ */
+static struct dots_mdl_result
+dots__mdl_put(struct dots__mdl_sink_prv *prv,
+              const struct dots_evt_event *event) {
+  unsigned char out[DOTS_EVT_WRITER_MAX];
+  struct dots_evt_writer_result written =
+      dots_evt_writer_put(&prv->writer, event, out, sizeof out);
+  struct dots_mdl_result result = dots__mdl_result(DOTS_MDL_OK);
+  size_t i;
+
+  if (written.status == DOTS_EVT_WRITER_ILL_FORMED) {
+    result.status = DOTS_MDL_ILL_FORMED;
+    result.code = written.code;
+    return result;
+  }
+  if (written.status != DOTS_EVT_WRITER_OK) {
+    /* not reached: events in order, chunks within their run and out */
+    result.status = DOTS_MDL_OUT_OF_ORDER;
+    return result;
+  }
+  for (i = 0; i < written.size; ++i) {
+    if (prv->output.put(out[i], prv->output.handle) != 0) {
+      result.status = DOTS_MDL_IO_FAILED;
+      return result;
+    }
+  }
+  return result;
+}
+
+/**
+ * Writes the runs of a layer, then its end.
+ *
+ * @param prv the sink's state
+ * @param run the first run, or 0
+ * @param text 1 for the text layer, 0 for the block layer
+ * @return the result
+ */
+static struct dots_mdl_result
+dots__mdl_put_layer(struct dots__mdl_sink_prv *prv,
+                    const struct dots_mdl_run *run, int text) {
+  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_mdl_result result = dots__mdl_result(DOTS_MDL_OK);
+
+  for (; run != 0 && result.status == DOTS_MDL_OK; run = run->next) {
+    const unsigned char *data = run->data;
+    uint64_t left = run->count;
+
+    event.type = DOTS_EVT_EVENT_RUN;
+    event.run.text = text;
+    event.run.x = run->position.x;
+    event.run.y = run->position.y;
+    event.run.count = run->count;
+    result = dots__mdl_put(prv, &event);
+    event.type = DOTS_EVT_EVENT_CHUNK;
+    while (left > 0 && result.status == DOTS_MDL_OK) {
+      size_t size =
+          left < DOTS_EVT_WRITER_MAX ? (size_t)left : DOTS_EVT_WRITER_MAX;
+
+      event.chunk.octets = data;
+      event.chunk.size = size;
+      result = dots__mdl_put(prv, &event);
+      data += size;
+      left -= size;
+    }
+  }
+  if (result.status == DOTS_MDL_OK) {
+    event.type =
+        text ? DOTS_EVT_EVENT_END_OF_TEXT : DOTS_EVT_EVENT_END_OF_BLOCKS;
+    result = dots__mdl_put(prv, &event);
+  }
+  return result;
+}
+
+struct dots_mdl_result dots_mdl_open_sink(struct dots_mdl_sink *sink,
+                                          struct dots_mdl_output output,
+                                          const struct dots_header *header) {
+  struct dots__mdl_sink_prv *prv = &sink->prv;
+  struct dots_evt_event event = DOTS__ZERO;
+
+  dots_evt_writer_init(&prv->writer);
+  prv->output = output;
+  event.type = DOTS_EVT_EVENT_HEADER;
+  event.header = *header;
+  prv->result = dots__mdl_put(prv, &event);
+  return prv->result;
+}
+
+struct dots_mdl_result dots_mdl_put_frame(struct dots_mdl_sink *sink,
+                                          const struct dots_mdl_frame *frame) {
+  struct dots__mdl_sink_prv *prv = &sink->prv;
+  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_mdl_result result;
+
+  if (prv->result.status != DOTS_MDL_OK) {
+    return prv->result;
+  }
+  event.type = DOTS_EVT_EVENT_FRAME;
+  event.clear = frame->clear;
+  result = dots__mdl_put(prv, &event);
+  if (result.status == DOTS_MDL_OK) {
+    result = dots__mdl_put_layer(prv, frame->blocks.runs, 0);
+  }
+  if (result.status == DOTS_MDL_OK) {
+    result = dots__mdl_put_layer(prv, frame->text.runs, 1);
+  }
+  prv->result = result;
+  return result;
+}
+
+struct dots_mdl_result dots_mdl_close_sink(struct dots_mdl_sink *sink) {
+  struct dots__mdl_sink_prv *prv = &sink->prv;
+  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_mdl_result result;
+
+  if (prv->result.status != DOTS_MDL_OK) {
+    return prv->result;
+  }
+  event.type = DOTS_EVT_EVENT_END_OF_STREAM;
+  result = dots__mdl_put(prv, &event);
+  prv->result = result.status == DOTS_MDL_OK
+                    ? dots__mdl_result(DOTS_MDL_OUT_OF_ORDER)
+                    : result;
+  return result;
+}
+
+/**
+ * Replays the runs of a layer, then its end, to a composer.
+ *
+ * @param composer the composer
+ * @param run the first run, or 0
+ * @param text 1 for the text layer, 0 for the block layer
+ */
+static void dots__mdl_compose_layer(struct dots_evt_composer *composer,
+                                    const struct dots_mdl_run *run, int text) {
+  struct dots_evt_event event = DOTS__ZERO;
+
+  for (; run != 0; run = run->next) {
+    event.type = DOTS_EVT_EVENT_RUN;
+    event.run.text = text;
+    event.run.x = run->position.x;
+    event.run.y = run->position.y;
+    event.run.count = run->count;
+    dots_evt_composer_apply(composer, &event);
+    if (run->count > 0) {
+      event.type = DOTS_EVT_EVENT_CHUNK;
+      event.chunk.octets = run->data;
+      event.chunk.size = (size_t)run->count; /* its data is in memory */
+      dots_evt_composer_apply(composer, &event);
+    }
+  }
+  event.type = text ? DOTS_EVT_EVENT_END_OF_TEXT : DOTS_EVT_EVENT_END_OF_BLOCKS;
+  dots_evt_composer_apply(composer, &event);
+}
+
+void dots_mdl_compose(struct dots_evt_composer *composer,
+                      const struct dots_mdl_frame *frame) {
+  struct dots_evt_event event = DOTS__ZERO;
+
+  event.type = DOTS_EVT_EVENT_FRAME;
+  event.clear = frame->clear;
+  dots_evt_composer_apply(composer, &event);
+  dots__mdl_compose_layer(composer, frame->blocks.runs, 0);
+  dots__mdl_compose_layer(composer, frame->text.runs, 1);
 }
 
 #endif /* DOTS_IMPLEMENTATION */

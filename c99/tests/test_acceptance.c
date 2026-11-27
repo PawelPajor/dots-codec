@@ -50,15 +50,15 @@ static const char *name(int code) {
 
 static const char *writer_status_name(int status) {
   switch (status) {
-  case DOTS_WRITER_OK:
+  case DOTS_EVT_WRITER_OK:
     return "OK";
-  case DOTS_WRITER_ILL_FORMED:
+  case DOTS_EVT_WRITER_ILL_FORMED:
     return "ILL_FORMED";
-  case DOTS_WRITER_OUT_OF_ORDER:
+  case DOTS_EVT_WRITER_OUT_OF_ORDER:
     return "OUT_OF_ORDER";
-  case DOTS_WRITER_PAST_COUNT:
+  case DOTS_EVT_WRITER_PAST_COUNT:
     return "PAST_COUNT";
-  case DOTS_WRITER_NO_SPACE:
+  case DOTS_EVT_WRITER_NO_SPACE:
     return "NO_SPACE";
   }
   return "an unknown status";
@@ -143,7 +143,8 @@ static bool try_parse_non_negative(toml_datum_t datum, uint64_t *value) {
 }
 
 /* dots-version: "major.minor.update". */
-static bool try_parse_version(toml_datum_t datum, struct dots_header *header) {
+static bool try_parse_version(toml_datum_t datum,
+                              struct dots_version *version) {
   const char *text;
   uint64_t major;
   uint64_t minor;
@@ -158,9 +159,9 @@ static bool try_parse_version(toml_datum_t datum, struct dots_header *header) {
       !try_parse_digits(&text, &update) || *text != '\0') {
     return false;
   }
-  header->major = major;
-  header->minor = minor;
-  header->update = update;
+  version->major = major;
+  version->minor = minor;
+  version->update = update;
   return true;
 }
 
@@ -186,12 +187,12 @@ static const char *read_meta(const char *path, bool accept,
     if (header.type != TOML_TABLE ||
         toml_get(top, "code").type != TOML_UNKNOWN ||
         !try_parse_version(toml_get(header, "dots-version"),
-                           &expected->header) ||
+                           &expected->header.version) ||
         text.type != TOML_BOOLEAN ||
         !try_parse_non_negative(toml_get(header, "columns"),
-                                &expected->header.columns) ||
+                                &expected->header.dimensions.x) ||
         !try_parse_non_negative(toml_get(header, "rows"),
-                                &expected->header.rows) ||
+                                &expected->header.dimensions.y) ||
         !try_parse_decimal(toml_get(header, "frame-rate"),
                            &expected->header.frame_rate)) {
       error = "an accept case's .meta without a well-formed [header]";
@@ -237,9 +238,9 @@ static void add_frame(struct surface *surface, const struct dots_cell *cells,
   uint64_t x;
   uint64_t y;
 
-  for (y = 0; y < header->rows; ++y) {
-    for (x = 0; x < header->columns; ++x) {
-      const struct dots_cell *cell = &cells[y * header->columns + x];
+  for (y = 0; y < header->dimensions.y; ++y) {
+    for (x = 0; x < header->dimensions.x; ++x) {
+      const struct dots_cell *cell = &cells[y * header->dimensions.x + x];
 
       add_point(surface, cell->character != 0 ? cell->character
                                               : dots_braille(cell->block));
@@ -292,38 +293,40 @@ static const char *read_surface(const char *path, struct surface *surface) {
 struct written {
   unsigned char octets[MAX_OCTETS];
   size_t size;
-  struct dots_writer_result refusal; /* the first, if status is not OK */
+  struct dots_evt_writer_result refusal; /* the first, if status is not OK */
 };
 
 /* Writes an event of the reader, until the writer refuses one. */
-static void write_event(struct dots_writer *writer,
-                        const struct dots_event *event,
+static void write_event(struct dots_evt_writer *writer,
+                        const struct dots_evt_event *event,
                         struct written *written) {
-  if (event->type == DOTS_EVENT_NONE || event->type == DOTS_EVENT_ERROR ||
-      written->refusal.status != DOTS_WRITER_OK) {
+  if (event->type == DOTS_EVT_EVENT_NONE ||
+      event->type == DOTS_EVT_EVENT_ERROR ||
+      written->refusal.status != DOTS_EVT_WRITER_OK) {
     return;
   }
   written->refusal =
-      dots_writer_put(writer, event, written->octets + written->size,
-                      sizeof written->octets - written->size);
+      dots_evt_writer_put(writer, event, written->octets + written->size,
+                          sizeof written->octets - written->size);
   written->size += written->refusal.size;
 }
 
 /*
  * Reads a stream in chunks of the given size, composes its frames and
- * writes its events. Gives the result of dots_reader_finish, the header
+ * writes its events. Gives the result of dots_evt_reader_finish, the header
  * if the reader gave one, the surface of each frame and the stream
  * written. Returns false if the reader used no input and gave no event.
  */
 static bool read_in_chunks(const unsigned char *octets, size_t size,
-                           size_t chunk, struct dots_event *result,
+                           size_t chunk, struct dots_evt_event *result,
                            struct dots_header *header, bool *has_header,
                            struct surface *surface, struct written *written) {
-  static const struct dots_writer_result ok = {DOTS_WRITER_OK, DOTS_OK, 0};
+  static const struct dots_evt_writer_result ok = {DOTS_EVT_WRITER_OK, DOTS_OK,
+                                                   0};
   static struct dots_cell cells[MAX_CELLS];
-  struct dots_reader reader;
-  struct dots_writer writer;
-  struct dots_composer composer;
+  struct dots_evt_reader reader;
+  struct dots_evt_writer writer;
+  struct dots_evt_composer composer;
   bool composing = false;
   size_t at = 0;
 
@@ -332,38 +335,39 @@ static bool read_in_chunks(const unsigned char *octets, size_t size,
   surface->too_large = false;
   written->size = 0;
   written->refusal = ok;
-  dots_reader_init(&reader);
-  dots_writer_init(&writer);
+  dots_evt_reader_init(&reader);
+  dots_evt_writer_init(&writer);
   while (at < size) {
     size_t end = at + chunk < size ? at + chunk : size;
 
     while (at < end) {
-      struct dots_event event;
-      size_t used = dots_reader_feed(&reader, octets + at, end - at, &event);
+      struct dots_evt_event event;
+      size_t used =
+          dots_evt_reader_feed(&reader, octets + at, end - at, &event);
 
-      if (used > end - at || (used == 0 && event.type == DOTS_EVENT_NONE)) {
+      if (used > end - at || (used == 0 && event.type == DOTS_EVT_EVENT_NONE)) {
         return false;
       }
       write_event(&writer, &event, written);
-      if (event.type == DOTS_EVENT_HEADER) {
+      if (event.type == DOTS_EVT_EVENT_HEADER) {
         *header = event.header;
         *has_header = true;
-        composing = dots_composer_init(&composer, header, cells, MAX_CELLS);
+        composing = dots_evt_composer_init(&composer, header, cells, MAX_CELLS);
         surface->too_large = !composing;
       } else if (composing) {
-        dots_composer_apply(&composer, &event);
-        if (event.type == DOTS_EVENT_END_OF_TEXT) {
+        dots_evt_composer_apply(&composer, &event);
+        if (event.type == DOTS_EVT_EVENT_END_OF_TEXT) {
           add_frame(surface, cells, header);
         }
       }
-      if (event.type == DOTS_EVENT_ERROR) {
+      if (event.type == DOTS_EVT_EVENT_ERROR) {
         at = size;
         break;
       }
       at += used;
     }
   }
-  dots_reader_finish(&reader, result);
+  dots_evt_reader_finish(&reader, result);
   return true;
 }
 
@@ -401,7 +405,7 @@ TEST acceptance(const char *name_of_case) {
   ASSERTm("the stream is too long for this test", size <= MAX_OCTETS);
 
   for (chunk = 1; chunk <= size; ++chunk) {
-    struct dots_event result;
+    struct dots_evt_event result;
     struct dots_header header;
     bool has_header;
 
@@ -410,19 +414,20 @@ TEST acceptance(const char *name_of_case) {
             read_in_chunks(stream, size, chunk, &result, &header, &has_header,
                            &surface, &written));
     ASSERTm("finishing gave neither the end of the stream nor an error",
-            result.type == DOTS_EVENT_END_OF_STREAM ||
-                result.type == DOTS_EVENT_ERROR);
+            result.type == DOTS_EVT_EVENT_END_OF_STREAM ||
+                result.type == DOTS_EVT_EVENT_ERROR);
     if (accept) {
-      ASSERT_ENUM_EQm(message, DOTS_OK,
-                      result.type == DOTS_EVENT_ERROR ? result.code : DOTS_OK,
-                      name);
+      ASSERT_ENUM_EQm(
+          message, DOTS_OK,
+          result.type == DOTS_EVT_EVENT_ERROR ? result.code : DOTS_OK, name);
       ASSERTm("no header event", has_header);
-      ASSERT_U64("major", expected.header.major, header.major);
-      ASSERT_U64("minor", expected.header.minor, header.minor);
-      ASSERT_U64("update", expected.header.update, header.update);
+      ASSERT_U64("major", expected.header.version.major, header.version.major);
+      ASSERT_U64("minor", expected.header.version.minor, header.version.minor);
+      ASSERT_U64("update", expected.header.version.update,
+                 header.version.update);
       ASSERT_U64("flags", expected.header.flags, header.flags);
-      ASSERT_U64("columns", expected.header.columns, header.columns);
-      ASSERT_U64("rows", expected.header.rows, header.rows);
+      ASSERT_U64("columns", expected.header.dimensions.x, header.dimensions.x);
+      ASSERT_U64("rows", expected.header.dimensions.y, header.dimensions.y);
       ASSERT_U64("frame-rate", expected.header.frame_rate, header.frame_rate);
       ASSERTm("the grid or its frames are too large for this test",
               !surface.too_large);
@@ -430,14 +435,14 @@ TEST acceptance(const char *name_of_case) {
               surface.size == expected_surface.size &&
                   memcmp(surface.points, expected_surface.points,
                          surface.size * sizeof surface.points[0]) == 0);
-      ASSERT_ENUM_EQm("the writer refused an event", DOTS_WRITER_OK,
+      ASSERT_ENUM_EQm("the writer refused an event", DOTS_EVT_WRITER_OK,
                       written.refusal.status, writer_status_name);
       ASSERTm("the stream written differs",
               written.size == result.offset + 1 &&
                   memcmp(written.octets, stream, written.size) == 0);
     } else {
       ASSERTm("a reject case read without an error",
-              result.type == DOTS_EVENT_ERROR);
+              result.type == DOTS_EVT_EVENT_ERROR);
       ASSERT_ENUM_EQm(message, expected.code, result.code, name);
       ASSERT_U64(message, expected.offset, result.offset);
     }
