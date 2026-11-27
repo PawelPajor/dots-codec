@@ -27,6 +27,23 @@ writes the documentation of `dots.h` to `build/html/index.html`. A
 documentation error, such as a `@param` naming no parameter, fails
 the build.
 
+## Examples
+
+One program per level and direction, in [`examples/`](examples/),
+built with the project:
+
+| Example                                   | Does                                                |
+|-------------------------------------------|-----------------------------------------------------|
+| [`model_read.c`](examples/model_read.c)   | reads a stream and prints each frame                |
+| [`model_write.c`](examples/model_write.c) | writes a stream of three frames                     |
+| [`event_read.c`](examples/event_read.c)   | `model_read.c` at the event level                   |
+| [`event_write.c`](examples/event_write.c) | `model_write.c` at the event level: the same octets |
+
+```sh
+build/examples/example_model_write hi.dots  # write a stream
+build/examples/example_model_read hi.dots   # print its frames
+```
+
 ## Tests
 
 The tests use [greatest](https://github.com/silentbicycle/greatest)
@@ -39,6 +56,7 @@ To configure without network access, after a first fetch, add
 ctest --test-dir build                   # all tests
 ctest --test-dir build -R '^acceptance/' # the acceptance tests
 ctest --test-dir build -R '^unit'        # the unit tests, in C and C++
+ctest --test-dir build -R '^example/'    # the examples
 ctest --test-dir build -N                # list the tests
 ```
 
@@ -49,6 +67,9 @@ The port is correct when every test passes.
   `acceptance/<accept|reject>/<case>`, made when configuring.
 - Unit tests: one per `SUITE` of `tests/test_unit.c` and language,
   `unit/<suite>` and `unit-cpp/<suite>`.
+- Examples: each writer writes its stream, both give the same octets,
+  and each reader reads both and the spec's
+  [full example](../spec/examples/full.txt): `example/<name>`.
 
 To run them without CTest, for instance under a debugger:
 
