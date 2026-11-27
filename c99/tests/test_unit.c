@@ -19,7 +19,7 @@
 TEST code_names(void) {
   ASSERT_STR_EQ("OK", dots_code_name(DOTS_OK));
   ASSERT_STR_EQ("INVALID_TEXT", dots_code_name(DOTS_INVALID_TEXT));
-  ASSERT_EQ(0, dots_code_name((enum dots_code)9));
+  ASSERT_EQ(NULL, dots_code_name((enum dots_code)9));
   PASS();
 }
 
@@ -73,9 +73,9 @@ TEST events(void) {
     ASSERT_EQ(types[i], event.type);
     ASSERT_EQ(offsets[i], event.offset);
     if (i == 1) {
-      ASSERT_EQ(1, event.clear);
+      ASSERT(event.clear);
     } else if (i == 2) {
-      ASSERT_EQ(0, event.run.text);
+      ASSERT_FALSE(event.run.text);
       ASSERT_EQ(3, event.run.x);
       ASSERT_EQ(1, event.run.y);
       ASSERT_EQ(2, event.run.count);
@@ -83,9 +83,9 @@ TEST events(void) {
       ASSERT_EQ(stream + 16, event.chunk.octets);
       ASSERT_EQ(2, event.chunk.size);
     } else if (i == 6) {
-      ASSERT_EQ(0, event.clear);
+      ASSERT_FALSE(event.clear);
     } else if (i == 8) {
-      ASSERT_EQ(1, event.run.text);
+      ASSERT(event.run.text);
       ASSERT_EQ(0, event.run.count);
     }
   }
@@ -206,7 +206,7 @@ static struct dots_evt_event header_event(uint64_t major, uint64_t minor,
   return event;
 }
 
-static struct dots_evt_event frame_event(int clear) {
+static struct dots_evt_event frame_event(bool clear) {
   struct dots_evt_event event = DOTS__ZERO;
 
   event.type = DOTS_EVT_EVENT_FRAME;
@@ -214,7 +214,7 @@ static struct dots_evt_event frame_event(int clear) {
   return event;
 }
 
-static struct dots_evt_event run_event(int text, uint64_t x, uint64_t y,
+static struct dots_evt_event run_event(bool text, uint64_t x, uint64_t y,
                                        uint64_t count) {
   struct dots_evt_event event = DOTS__ZERO;
 
@@ -255,7 +255,7 @@ static struct dots_evt_writer_result put(struct dots_evt_writer *writer,
 static void start(struct dots_evt_writer *writer, uint64_t flags) {
   dots_evt_writer_init(writer);
   put(writer, header_event(0, 1, flags, 16, 4));
-  put(writer, frame_event(0));
+  put(writer, frame_event(false));
 }
 
 #define ASSERT_WRITTEN(result) ASSERT_EQ(DOTS_EVT_WRITER_OK, (result).status)
@@ -286,14 +286,14 @@ TEST writer_stream(void) {
   size_t i;
 
   events[0] = header_event(0, 1, 1, 16, 4);
-  events[1] = frame_event(1);
-  events[2] = run_event(0, 3, 1, 2);
+  events[1] = frame_event(true);
+  events[2] = run_event(false, 3, 1, 2);
   events[3] = chunk_event(blocks, sizeof blocks);
   events[4] = token_event(DOTS_EVT_EVENT_END_OF_BLOCKS);
   events[5] = token_event(DOTS_EVT_EVENT_END_OF_TEXT);
-  events[6] = frame_event(0);
+  events[6] = frame_event(false);
   events[7] = token_event(DOTS_EVT_EVENT_END_OF_BLOCKS);
-  events[8] = run_event(1, 0, 0, 0);
+  events[8] = run_event(true, 0, 0, 0);
   events[9] = token_event(DOTS_EVT_EVENT_END_OF_TEXT);
   events[10] = token_event(DOTS_EVT_EVENT_END_OF_STREAM);
   dots_evt_writer_init(&writer);
@@ -333,7 +333,7 @@ TEST writer_split_text(void) {
 
   start(&writer, 1);
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_BLOCKS)));
-  ASSERT_WRITTEN(put(&writer, run_event(1, 15, 3, sizeof euro)));
+  ASSERT_WRITTEN(put(&writer, run_event(true, 15, 3, sizeof euro)));
   for (i = 0; i < sizeof euro; ++i) {
     ASSERT_WRITTEN(put(&writer, chunk_event(euro + i, 1)));
   }
@@ -349,16 +349,16 @@ TEST writer_out_of_order(void) {
 
   dots_evt_writer_init(&writer);
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
-                 put(&writer, frame_event(1)));
+                 put(&writer, frame_event(true)));
   start(&writer, 1);
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
                  put(&writer, header_event(0, 1, 1, 16, 4)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
-                 put(&writer, frame_event(1)));
+                 put(&writer, frame_event(true)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
                  put(&writer, token_event(DOTS_EVT_EVENT_END_OF_STREAM)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
-                 put(&writer, run_event(1, 0, 0, 1)));
+                 put(&writer, run_event(true, 0, 0, 1)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
                  put(&writer, chunk_event(&block, 1)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
@@ -369,11 +369,11 @@ TEST writer_out_of_order(void) {
                  put(&writer, token_event(DOTS_EVT_EVENT_ERROR)));
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_BLOCKS)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
-                 put(&writer, run_event(0, 0, 0, 1)));
+                 put(&writer, run_event(false, 0, 0, 1)));
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_TEXT)));
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_STREAM)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_OUT_OF_ORDER, DOTS_OK,
-                 put(&writer, frame_event(1)));
+                 put(&writer, frame_event(true)));
   PASS();
 }
 
@@ -383,7 +383,7 @@ TEST writer_past_count(void) {
   struct dots_evt_writer writer;
 
   start(&writer, 0);
-  ASSERT_WRITTEN(put(&writer, run_event(0, 0, 0, 2)));
+  ASSERT_WRITTEN(put(&writer, run_event(false, 0, 0, 2)));
   ASSERT_WRITTEN(put(&writer, chunk_event(blocks, 1)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_PAST_COUNT, DOTS_OK,
                  put(&writer, chunk_event(blocks, 2)));
@@ -404,8 +404,8 @@ TEST writer_no_space(void) {
   ASSERT_REFUSED(DOTS_EVT_WRITER_NO_SPACE, DOTS_OK,
                  dots_evt_writer_put(&writer, &header, out, 10));
   ASSERT_WRITTEN(dots_evt_writer_put(&writer, &header, out, 11));
-  ASSERT_WRITTEN(put(&writer, frame_event(0)));
-  ASSERT_WRITTEN(put(&writer, run_event(0, 0, 0, sizeof blocks)));
+  ASSERT_WRITTEN(put(&writer, frame_event(false)));
+  ASSERT_WRITTEN(put(&writer, run_event(false, 0, 0, sizeof blocks)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_NO_SPACE, DOTS_OK,
                  dots_evt_writer_put(&writer, &chunk, out, 1));
   ASSERT_WRITTEN(dots_evt_writer_put(&writer, &chunk, out, 2));
@@ -440,29 +440,29 @@ TEST writer_ill_formed_run(void) {
 
   start(&writer, 0);
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
-                 put(&writer, run_event(0, 16, 0, 1)));
+                 put(&writer, run_event(false, 16, 0, 1)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
-                 put(&writer, run_event(0, 0, 4, 1)));
+                 put(&writer, run_event(false, 0, 4, 1)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
-                 put(&writer, run_event(0, 15, 0, 2)));
-  ASSERT_WRITTEN(put(&writer, run_event(0, 14, 0, sizeof blocks)));
+                 put(&writer, run_event(false, 15, 0, 2)));
+  ASSERT_WRITTEN(put(&writer, run_event(false, 14, 0, sizeof blocks)));
   ASSERT_WRITTEN(put(&writer, chunk_event(blocks, sizeof blocks)));
 
   start(&writer, 0);
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_BLOCKS)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_UNEXPECTED_TEXT,
-                 put(&writer, run_event(1, 0, 0, 0)));
+                 put(&writer, run_event(true, 0, 0, 0)));
 
   start(&writer, 1);
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_BLOCKS)));
-  ASSERT_WRITTEN(put(&writer, run_event(1, 0, 0, sizeof invalid)));
+  ASSERT_WRITTEN(put(&writer, run_event(true, 0, 0, sizeof invalid)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_INVALID_TEXT,
                  put(&writer, chunk_event(invalid, sizeof invalid)));
   ASSERT_WRITTEN(put(&writer, chunk_event(invalid, 1)));
 
   start(&writer, 1);
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_BLOCKS)));
-  ASSERT_WRITTEN(put(&writer, run_event(1, 0, 0, 2)));
+  ASSERT_WRITTEN(put(&writer, run_event(true, 0, 0, 2)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_INVALID_TEXT,
                  put(&writer, chunk_event(euro, 2)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_INVALID_TEXT,
@@ -482,14 +482,14 @@ TEST writer_dead_end(void) {
 
   start(&writer, 1);
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
-                 put(&writer, run_event(0, 14, 0, 3)));
-  ASSERT_WRITTEN(put(&writer, run_event(0, 14, 0, 2)));
+                 put(&writer, run_event(false, 14, 0, 3)));
+  ASSERT_WRITTEN(put(&writer, run_event(false, 14, 0, 2)));
   ASSERT_WRITTEN(put(&writer, chunk_event(text, 1)));
   ASSERT_WRITTEN(put(&writer, chunk_event(text, 1)));
   ASSERT_WRITTEN(put(&writer, token_event(DOTS_EVT_EVENT_END_OF_BLOCKS)));
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
-                 put(&writer, run_event(1, 14, 0, 9)));
-  ASSERT_WRITTEN(put(&writer, run_event(1, 14, 0, 5)));
+                 put(&writer, run_event(true, 14, 0, 9)));
+  ASSERT_WRITTEN(put(&writer, run_event(true, 14, 0, 5)));
   /* "A" leaves 4 octets for 1 cell; "AA" would leave 3 for none */
   ASSERT_REFUSED(DOTS_EVT_WRITER_ILL_FORMED, DOTS_OUTSIDE_GRID,
                  put(&writer, chunk_event(text, 2)));
@@ -591,18 +591,18 @@ TEST writer_then_reader(void) {
   size_t i;
 
   events[count++] = header_event(0, 1, 1, 4, 2);
-  events[count++] = frame_event(0);
-  events[count++] = run_event(0, 0, 0, sizeof blocks);
+  events[count++] = frame_event(false);
+  events[count++] = run_event(false, 0, 0, sizeof blocks);
   events[count++] = chunk_event(blocks, 2);
   events[count++] = chunk_event(blocks + 2, 2);
   events[count++] = token_event(DOTS_EVT_EVENT_END_OF_BLOCKS);
-  events[count++] = run_event(1, 1, 1, sizeof text);
+  events[count++] = run_event(true, 1, 1, sizeof text);
   events[count++] = chunk_event(text, 2);
   events[count++] = chunk_event(text + 2, 1);
   events[count++] = chunk_event(text + 3, 3);
   events[count++] = chunk_event(text + 6, 2);
   events[count++] = token_event(DOTS_EVT_EVENT_END_OF_TEXT);
-  events[count++] = frame_event(1);
+  events[count++] = frame_event(true);
   events[count++] = token_event(DOTS_EVT_EVENT_END_OF_BLOCKS);
   events[count++] = token_event(DOTS_EVT_EVENT_END_OF_TEXT);
   events[count++] = token_event(DOTS_EVT_EVENT_END_OF_STREAM);
@@ -1045,7 +1045,9 @@ static int memory_put(int octet, void *handle) {
 static struct memory memory_of(const unsigned char *octets, size_t size) {
   struct memory memory;
 
-  memcpy(memory.octets, octets, size);
+  if (size > 0) {
+    memcpy(memory.octets, octets, size);
+  }
   memory.size = size;
   memory.next = 0;
   memory.fail_at = SIZE_MAX;
@@ -1065,10 +1067,10 @@ static void *counting_allocate(size_t size) {
     largest = size;
   }
   if (allocations >= fail_from) {
-    return 0;
+    return NULL;
   }
   pointer = malloc(size);
-  if (pointer != 0) {
+  if (pointer != NULL) {
     ++allocations;
     ++blocks_held;
   }
@@ -1076,7 +1078,7 @@ static void *counting_allocate(size_t size) {
 }
 
 static void counting_free(void *pointer) {
-  if (pointer != 0) {
+  if (pointer != NULL) {
     --blocks_held;
   }
   free(pointer);
@@ -1115,19 +1117,19 @@ TEST model_read(void) {
   ASSERT_EQ(10, header.frame_rate);
   result = dots_mdl_get_frame(&source, &frame);
   ASSERT_EQ(DOTS_MDL_OK, result.status);
-  ASSERT_EQ(1, frame->clear);
-  ASSERT_EQ(0, frame->blocks.runs);
+  ASSERT(frame->clear);
+  ASSERT_EQ(NULL, frame->blocks.runs);
   run = frame->text.runs;
-  ASSERT(run != 0);
+  ASSERT(run != NULL);
   ASSERT_EQ(0, run->position.x);
   ASSERT_EQ(0, run->position.y);
   ASSERT_EQ(2, run->count);
   ASSERT_MEM_EQ("Hi", run->data, 2);
-  ASSERT_EQ(0, run->next);
+  ASSERT_EQ(NULL, run->next);
   dots_mdl_release_frame(&source, frame);
   ASSERT_EQ(0, blocks_held);
   ASSERT_EQ(DOTS_MDL_END, dots_mdl_get_frame(&source, &frame).status);
-  ASSERT_EQ(0, frame);
+  ASSERT_EQ(NULL, frame);
   ASSERT_EQ(DOTS_MDL_END, dots_mdl_get_frame(&source, &frame).status);
   PASS();
 }
@@ -1146,13 +1148,13 @@ static struct dots_header hi_header(void) {
 }
 
 TEST model_write(void) {
-  struct memory memory = memory_of(0, 0);
+  struct memory memory = memory_of(NULL, 0);
   struct dots_mdl_output output = {memory_put, &memory};
   struct dots_header header = hi_header();
   struct dots_mdl_sink sink;
   unsigned char text[] = "Hi";
-  struct dots_mdl_run hi = {{0, 0}, 2, text, 0};
-  struct dots_mdl_frame frame = {1, {0}, {&hi}};
+  struct dots_mdl_run hi = {{0, 0}, 2, text, NULL};
+  struct dots_mdl_frame frame = {true, {NULL}, {&hi}};
 
   ASSERT_EQ(DOTS_MDL_OK, dots_mdl_open_sink(&sink, output, &header).status);
   ASSERT_EQ(DOTS_MDL_OK, dots_mdl_put_frame(&sink, &frame).status);
@@ -1167,7 +1169,7 @@ TEST model_write(void) {
 
 /* Two frames, the first with runs longer than a chunk of the sink. */
 TEST model_round_trip(void) {
-  struct memory memory = memory_of(0, 0);
+  struct memory memory = memory_of(NULL, 0);
   struct dots_mdl_output output = {memory_put, &memory};
   struct dots_mdl_input input = {memory_get, &memory};
   struct dots_header header = hi_header();
@@ -1176,10 +1178,11 @@ TEST model_round_trip(void) {
   struct dots_mdl_source source;
   unsigned char blocks[100];
   unsigned char text[] = "\xE2\xA0\x81z";
-  struct dots_mdl_run second = {{1, 1}, 4, text, 0};
-  struct dots_mdl_run first = {{0, 1}, 0, 0, &second};
-  struct dots_mdl_run row = {{0, 0}, 100, blocks, 0};
-  struct dots_mdl_frame frames[2] = {{1, {&row}, {&first}}, {0, {0}, {0}}};
+  struct dots_mdl_run second = {{1, 1}, 4, text, NULL};
+  struct dots_mdl_run first = {{0, 1}, 0, NULL, &second};
+  struct dots_mdl_run row = {{0, 0}, 100, blocks, NULL};
+  struct dots_mdl_frame frames[2] = {{true, {&row}, {&first}},
+                                     {false, {NULL}, {NULL}}};
   struct dots_mdl_frame *frame;
   size_t i;
 
@@ -1196,20 +1199,20 @@ TEST model_round_trip(void) {
             dots_mdl_open_source(&source, counting, input, &read).status);
   ASSERT_EQ(100, read.dimensions.x);
   ASSERT_EQ(DOTS_MDL_OK, dots_mdl_get_frame(&source, &frame).status);
-  ASSERT_EQ(1, frame->clear);
+  ASSERT(frame->clear);
   ASSERT_EQ(100, frame->blocks.runs->count);
   ASSERT_MEM_EQ(blocks, frame->blocks.runs->data, sizeof blocks);
-  ASSERT_EQ(0, frame->blocks.runs->next);
+  ASSERT_EQ(NULL, frame->blocks.runs->next);
   ASSERT_EQ(0, frame->text.runs->count);
-  ASSERT_EQ(0, frame->text.runs->data);
+  ASSERT_EQ(NULL, frame->text.runs->data);
   ASSERT_EQ(1, frame->text.runs->next->position.x);
   ASSERT_MEM_EQ(text, frame->text.runs->next->data, 4);
-  ASSERT_EQ(0, frame->text.runs->next->next);
+  ASSERT_EQ(NULL, frame->text.runs->next->next);
   dots_mdl_release_frame(&source, frame);
   ASSERT_EQ(DOTS_MDL_OK, dots_mdl_get_frame(&source, &frame).status);
-  ASSERT_EQ(0, frame->clear);
-  ASSERT_EQ(0, frame->blocks.runs);
-  ASSERT_EQ(0, frame->text.runs);
+  ASSERT_FALSE(frame->clear);
+  ASSERT_EQ(NULL, frame->blocks.runs);
+  ASSERT_EQ(NULL, frame->text.runs);
   dots_mdl_release_frame(&source, frame);
   ASSERT_EQ(DOTS_MDL_END, dots_mdl_get_frame(&source, &frame).status);
   ASSERT_EQ(0, blocks_held);
@@ -1232,7 +1235,7 @@ TEST model_ill_formed(void) {
   ASSERT_EQ(DOTS_MDL_ILL_FORMED, result.status);
   ASSERT_EQ(DOTS_TRUNCATED, result.code);
   ASSERT_EQ(sizeof hi_stream - 3, result.offset);
-  ASSERT_EQ(0, frame);
+  ASSERT_EQ(NULL, frame);
   ASSERT_EQ(0, blocks_held);
   result = dots_mdl_get_frame(&source, &frame);
   ASSERT_EQ(DOTS_MDL_ILL_FORMED, result.status);
@@ -1297,7 +1300,7 @@ TEST model_no_memory(void) {
     counting_reset(fail);
     dots_mdl_open_source(&source, counting, input, &header);
     ASSERT_EQ(DOTS_MDL_NO_MEMORY, dots_mdl_get_frame(&source, &frame).status);
-    ASSERT_EQ(0, frame);
+    ASSERT_EQ(NULL, frame);
     ASSERT_EQ(0, blocks_held);
     ASSERT_EQ(DOTS_MDL_NO_MEMORY, dots_mdl_get_frame(&source, &frame).status);
   }
@@ -1312,7 +1315,7 @@ TEST model_io_failed(void) {
   struct dots_mdl_source source;
   struct dots_mdl_sink sink;
   struct dots_mdl_frame *frame;
-  struct dots_mdl_frame empty = {0, {0}, {0}};
+  struct dots_mdl_frame empty = {false, {NULL}, {NULL}};
 
   memory.fail_at = 15;
   counting_reset(SIZE_MAX);
@@ -1320,7 +1323,7 @@ TEST model_io_failed(void) {
   ASSERT_EQ(DOTS_MDL_IO_FAILED, dots_mdl_get_frame(&source, &frame).status);
   ASSERT_EQ(0, blocks_held);
   ASSERT_EQ(DOTS_MDL_IO_FAILED, dots_mdl_get_frame(&source, &frame).status);
-  memory = memory_of(0, 0);
+  memory = memory_of(NULL, 0);
   memory.fail_at = 12;
   ASSERT_EQ(DOTS_MDL_OK, dots_mdl_open_sink(&sink, output, &header).status);
   ASSERT_EQ(DOTS_MDL_IO_FAILED, dots_mdl_put_frame(&sink, &empty).status);
@@ -1330,13 +1333,13 @@ TEST model_io_failed(void) {
 
 /* The writer's code, final; the frame partly written. */
 TEST model_sink_ill_formed(void) {
-  struct memory memory = memory_of(0, 0);
+  struct memory memory = memory_of(NULL, 0);
   struct dots_mdl_output output = {memory_put, &memory};
   struct dots_header header = hi_header();
   struct dots_mdl_sink sink;
   unsigned char text[] = "Hi";
-  struct dots_mdl_run hi = {{0, 0}, 2, text, 0};
-  struct dots_mdl_frame frame = {1, {0}, {&hi}};
+  struct dots_mdl_run hi = {{0, 0}, 2, text, NULL};
+  struct dots_mdl_frame frame = {true, {NULL}, {&hi}};
   struct dots_mdl_result result;
 
   header.flags = 0;
@@ -1359,10 +1362,10 @@ TEST model_compose(void) {
   struct dots_cell cells[64];
   unsigned char blocks[] = {0x39, 0xFF};
   unsigned char text[] = "Hi";
-  struct dots_mdl_run hi = {{14, 3}, 2, text, 0};
-  struct dots_mdl_run dots = {{1, 0}, 2, blocks, 0};
-  struct dots_mdl_frame first = {1, {&dots}, {&hi}};
-  struct dots_mdl_frame second = {0, {0}, {0}};
+  struct dots_mdl_run hi = {{14, 3}, 2, text, NULL};
+  struct dots_mdl_run dots = {{1, 0}, 2, blocks, NULL};
+  struct dots_mdl_frame first = {true, {&dots}, {&hi}};
+  struct dots_mdl_frame second = {false, {NULL}, {NULL}};
 
   dots_evt_composer_init(&composer, &header, cells, 64);
   dots_mdl_compose(&composer, &first);
@@ -1372,9 +1375,9 @@ TEST model_compose(void) {
   ASSERT_EQ(0xFF, cells[2].block);
   ASSERT_EQ('H', cells[62].character);
   ASSERT_EQ('i', cells[63].character);
-  first.clear = 1;
-  first.blocks.runs = 0;
-  first.text.runs = 0;
+  first.clear = true;
+  first.blocks.runs = NULL;
+  first.text.runs = NULL;
   dots_mdl_compose(&composer, &first);
   ASSERT_EQ(0x00, cells[1].block);
   ASSERT_EQ(0, cells[63].character);
@@ -1383,16 +1386,16 @@ TEST model_compose(void) {
 
 TEST model_stdio(void) {
   FILE *file = tmpfile();
-  struct dots_mdl_input input = {dots_mdl_stdio_get, 0};
-  struct dots_mdl_output output = {dots_mdl_stdio_put, 0};
+  struct dots_mdl_input input = {dots_mdl_stdio_get, NULL};
+  struct dots_mdl_output output = {dots_mdl_stdio_put, NULL};
   struct dots_mdl_allocator allocator = {malloc, free};
   struct dots_header header = hi_header();
   struct dots_mdl_sink sink;
   struct dots_mdl_source source;
   struct dots_mdl_frame *frame;
-  struct dots_mdl_frame empty = {1, {0}, {0}};
+  struct dots_mdl_frame empty = {true, {NULL}, {NULL}};
 
-  if (file == 0) {
+  if (file == NULL) {
     SKIPm("no temporary file");
   }
   input.handle = file;
@@ -1404,7 +1407,7 @@ TEST model_stdio(void) {
   ASSERT_EQ(DOTS_MDL_OK,
             dots_mdl_open_source(&source, allocator, input, &header).status);
   ASSERT_EQ(DOTS_MDL_OK, dots_mdl_get_frame(&source, &frame).status);
-  ASSERT_EQ(1, frame->clear);
+  ASSERT(frame->clear);
   dots_mdl_release_frame(&source, frame);
   ASSERT_EQ(DOTS_MDL_END, dots_mdl_get_frame(&source, &frame).status);
   fclose(file);

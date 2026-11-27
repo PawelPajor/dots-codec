@@ -45,7 +45,7 @@ static char message[256];
 static const char *name(int code) {
   const char *name = dots_code_name((enum dots_code)code);
 
-  return name != 0 ? name : "an unknown code";
+  return name != NULL ? name : "an unknown code";
 }
 
 static const char *writer_status_name(int status) {
@@ -77,7 +77,7 @@ static bool try_parse_code(toml_datum_t datum, enum dots_code *code) {
   if (datum.type != TOML_STRING) {
     return false;
   }
-  for (value = 0; dots_code_name((enum dots_code)value) != 0; ++value) {
+  for (value = 0; dots_code_name((enum dots_code)value) != NULL; ++value) {
     if (strcmp(dots_code_name((enum dots_code)value), datum.u.s) == 0) {
       *code = (enum dots_code)value;
       return true;
@@ -171,7 +171,7 @@ static const char *read_meta(const char *path, bool accept,
   toml_result_t meta = toml_parse_file_ex(path);
   toml_datum_t top = meta.toptab;
   toml_datum_t header;
-  const char *error = 0;
+  const char *error = NULL;
 
   if (!meta.ok) {
     snprintf(message, sizeof message, "%s: %s", path, meta.errmsg);
@@ -255,7 +255,7 @@ static const char *read_surface(const char *path, struct surface *surface) {
   size_t size;
   size_t i = 0;
 
-  if (file == 0) {
+  if (file == NULL) {
     return "cannot open the .surface file";
   }
   size = fread(octets, 1, sizeof octets, file);
@@ -390,16 +390,16 @@ TEST acceptance(const char *name_of_case) {
 
   snprintf(path, sizeof path, "%s/%s.meta", DOTS_SUITE_DIR, name_of_case);
   error = read_meta(path, accept, &expected);
-  ASSERT_FALSEm(error, error != 0);
+  ASSERT_FALSEm(error, error != NULL);
   if (accept) {
     snprintf(path, sizeof path, "%s/%s.surface", DOTS_SUITE_DIR, name_of_case);
     error = read_surface(path, &expected_surface);
-    ASSERT_FALSEm(error, error != 0);
+    ASSERT_FALSEm(error, error != NULL);
   }
 
   snprintf(path, sizeof path, "%s/%s.dots", DOTS_SUITE_DIR, name_of_case);
   file = fopen(path, "rb");
-  ASSERTm("cannot open the stream", file != 0);
+  ASSERTm("cannot open the stream", file != NULL);
   size = fread(stream, 1, sizeof stream, file);
   fclose(file);
   ASSERTm("the stream is too long for this test", size <= MAX_OCTETS);
