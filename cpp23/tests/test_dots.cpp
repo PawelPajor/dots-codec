@@ -12,9 +12,9 @@ static_assert(dots::code_name(dots::code::invalid_text) == "INVALID_TEXT");
 static_assert(dots::code_name(dots::code::out_of_order) == "OUT_OF_ORDER");
 static_assert(dots::code_name(dots::code::too_large) == "TOO_LARGE");
 static_assert(dots::code_name(static_cast<dots::code>(10)).empty());
-static_assert(dots::braille(0x00) == U'⠀');
-static_assert(dots::braille(0x39) == U'⠵'); // Section 5 of dots-content
-static_assert(dots::braille(0xFF) == U'⣿');
+static_assert(dots::braille(0x00) == U'\u2800');
+static_assert(dots::braille(0x39) == U'\u2835'); // Section 5 of dots-content
+static_assert(dots::braille(0xFF) == U'\u28FF');
 
 namespace {
 
