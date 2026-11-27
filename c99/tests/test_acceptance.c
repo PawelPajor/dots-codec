@@ -300,14 +300,22 @@ struct written {
 static void write_event(struct dots_evt_writer *writer,
                         const struct dots_evt_event *event,
                         struct written *written) {
+  unsigned char out[DOTS_EVT_WRITER_MAX];
+
   if (event->type == DOTS_EVT_EVENT_NONE ||
       event->type == DOTS_EVT_EVENT_ERROR ||
       written->refusal.status != DOTS_EVT_WRITER_OK) {
     return;
   }
-  written->refusal =
-      dots_evt_writer_put(writer, event, written->octets + written->size,
-                          sizeof written->octets - written->size);
+  written->refusal = dots_evt_writer_put(writer, event, out, sizeof out);
+  if (written->refusal.size > sizeof written->octets - written->size) {
+    written->refusal.status = DOTS_EVT_WRITER_NO_SPACE; /* of this test */
+    return;
+  }
+  if (written->refusal.size > 0) {
+    memcpy(written->octets + written->size, written->refusal.octets,
+           written->refusal.size);
+  }
   written->size += written->refusal.size;
 }
 
@@ -322,7 +330,7 @@ static bool read_in_chunks(const unsigned char *octets, size_t size,
                            struct dots_header *header, bool *has_header,
                            struct surface *surface, struct written *written) {
   static const struct dots_evt_writer_result ok = {DOTS_EVT_WRITER_OK, DOTS_OK,
-                                                   0};
+                                                   NULL, 0};
   static struct dots_cell cells[MAX_CELLS];
   struct dots_evt_reader reader;
   struct dots_evt_writer writer;

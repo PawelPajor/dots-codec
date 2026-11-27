@@ -258,6 +258,31 @@ static void start(struct dots_evt_writer *writer, uint64_t flags) {
   put(writer, frame_event(false));
 }
 
+/*
+ * Writes an event and appends its octets to stream, which holds size
+ * octets of capacity. Gives OK only if they fit.
+ */
+static enum dots_evt_writer_status append(struct dots_evt_writer *writer,
+                                          const struct dots_evt_event *event,
+                                          unsigned char *stream,
+                                          size_t capacity, size_t *size) {
+  unsigned char out[DOTS_EVT_WRITER_MAX];
+  struct dots_evt_writer_result result =
+      dots_evt_writer_put(writer, event, out, sizeof out);
+
+  if (result.status != DOTS_EVT_WRITER_OK) {
+    return result.status;
+  }
+  if (result.size > capacity - *size) {
+    return DOTS_EVT_WRITER_NO_SPACE;
+  }
+  if (result.size > 0) {
+    memcpy(stream + *size, result.octets, result.size);
+  }
+  *size += result.size;
+  return DOTS_EVT_WRITER_OK;
+}
+
 #define ASSERT_WRITTEN(result) ASSERT_EQ(DOTS_EVT_WRITER_OK, (result).status)
 
 #define ASSERT_REFUSED(status_, code_, result)                                 \
@@ -266,6 +291,7 @@ static void start(struct dots_evt_writer *writer, uint64_t flags) {
                                                                                \
     ASSERT_EQ(status_, refused.status);                                        \
     ASSERT_EQ(code_, refused.code);                                            \
+    ASSERT_EQ(NULL, refused.octets);                                           \
     ASSERT_EQ(0, refused.size);                                                \
   } while (0)
 
@@ -298,11 +324,8 @@ TEST writer_stream(void) {
   events[10] = token_event(DOTS_EVT_EVENT_END_OF_STREAM);
   dots_evt_writer_init(&writer);
   for (i = 0; i < sizeof events / sizeof events[0]; ++i) {
-    struct dots_evt_writer_result result =
-        dots_evt_writer_put(&writer, &events[i], out + size, sizeof out - size);
-
-    ASSERT_WRITTEN(result);
-    size += result.size;
+    ASSERT_EQ(DOTS_EVT_WRITER_OK,
+              append(&writer, &events[i], out, sizeof out, &size));
   }
   ASSERT_EQ(sizeof stream, size);
   ASSERT_MEM_EQ(stream, out, size);
@@ -392,23 +415,31 @@ TEST writer_past_count(void) {
   PASS();
 }
 
-/* Octets that do not fit, then the same event with room. */
+/*
+ * Octets that do not fit, then the same event with room. A chunk is
+ * not copied: it needs no room, and its octets are its own.
+ */
 TEST writer_no_space(void) {
   static const unsigned char blocks[] = {1, 2};
   struct dots_evt_event header = header_event(0, 1, 0, 16, 4);
   struct dots_evt_event chunk = chunk_event(blocks, sizeof blocks);
   unsigned char out[DOTS_EVT_WRITER_MAX];
   struct dots_evt_writer writer;
+  struct dots_evt_writer_result result;
 
   dots_evt_writer_init(&writer);
   ASSERT_REFUSED(DOTS_EVT_WRITER_NO_SPACE, DOTS_OK,
                  dots_evt_writer_put(&writer, &header, out, 10));
-  ASSERT_WRITTEN(dots_evt_writer_put(&writer, &header, out, 11));
+  result = dots_evt_writer_put(&writer, &header, out, 11);
+  ASSERT_WRITTEN(result);
+  ASSERT_EQ(out, result.octets);
+  ASSERT_EQ(11, result.size);
   ASSERT_WRITTEN(put(&writer, frame_event(false)));
   ASSERT_WRITTEN(put(&writer, run_event(false, 0, 0, sizeof blocks)));
-  ASSERT_REFUSED(DOTS_EVT_WRITER_NO_SPACE, DOTS_OK,
-                 dots_evt_writer_put(&writer, &chunk, out, 1));
-  ASSERT_WRITTEN(dots_evt_writer_put(&writer, &chunk, out, 2));
+  result = dots_evt_writer_put(&writer, &chunk, NULL, 0);
+  ASSERT_WRITTEN(result);
+  ASSERT_EQ(blocks, result.octets);
+  ASSERT_EQ(sizeof blocks, result.size);
   PASS();
 }
 
@@ -609,11 +640,8 @@ TEST writer_then_reader(void) {
 
   dots_evt_writer_init(&writer);
   for (i = 0; i < count; ++i) {
-    struct dots_evt_writer_result result = dots_evt_writer_put(
-        &writer, &events[i], stream + size, sizeof stream - size);
-
-    ASSERT_WRITTEN(result);
-    size += result.size;
+    ASSERT_EQ(DOTS_EVT_WRITER_OK,
+              append(&writer, &events[i], stream, sizeof stream, &size));
     ASSERT(trace_add(&written, &events[i]));
   }
 
@@ -1201,7 +1229,7 @@ TEST model_write(void) {
   PASS();
 }
 
-/* Two frames, the first with runs longer than a chunk of the sink. */
+/* Two frames, the first with a run of 100 blocks and two text runs. */
 TEST model_round_trip(void) {
   struct memory memory = memory_of(NULL, 0);
   struct dots_mdl_output output = {memory_put, &memory};

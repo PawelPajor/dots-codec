@@ -86,10 +86,12 @@
  *
  * @code
  * static void put(const struct dots_evt_event *event) {
+ *   unsigned char octets[DOTS_EVT_WRITER_MAX];
  *   struct dots_evt_writer_result result =
- *       dots_evt_writer_put(&writer, event, out + size, sizeof out - size);
+ *       dots_evt_writer_put(&writer, event, octets, sizeof octets);
  *
  *   ... stop unless result.status is DOTS_EVT_WRITER_OK ...
+ *   memcpy(out + size, result.octets, result.size);
  *   size += result.size;
  * }
  *
@@ -427,10 +429,11 @@ void dots_evt_reader_finish(struct dots_evt_reader *reader,
 /**
  * @defgroup writer Writer
  *
- * Encodes events into a stream, one call per event, in buffers the
- * caller provides. It refuses any event that would make the stream
- * ill-formed (CNF-1), and then writes nothing and keeps its state. The
- * writer allocates nothing and never holds the stream.
+ * Encodes events into a stream, one call per event, in a buffer the
+ * caller provides. A chunk is checked, not copied: its octets are its
+ * own. It refuses any event that would make the stream ill-formed
+ * (CNF-1), and then writes nothing and keeps its state. The writer
+ * allocates nothing and never holds the stream.
  *
  * @code
  * struct dots_evt_writer writer;
@@ -438,8 +441,9 @@ void dots_evt_reader_finish(struct dots_evt_reader *reader,
  *
  * dots_evt_writer_init(&writer);
  * for each event, up to END_OF_STREAM:
- *   result = dots_evt_writer_put(&writer, &event, out, capacity);
- *   ... on DOTS_EVT_WRITER_OK, out holds result.size octets of the stream ...
+ *   result = dots_evt_writer_put(&writer, &event, out, sizeof out);
+ *   ... on DOTS_EVT_WRITER_OK, the next result.size octets of the stream
+ *       are at result.octets ...
  * @endcode
  *
  * @{
@@ -458,7 +462,7 @@ enum dots_evt_writer_status {
   DOTS_EVT_WRITER_OUT_OF_ORDER,
   /** a chunk past the count of its run */
   DOTS_EVT_WRITER_PAST_COUNT,
-  /** its octets do not fit the capacity */
+  /** an event but a chunk whose octets do not fit the capacity */
   DOTS_EVT_WRITER_NO_SPACE
 };
 
@@ -466,7 +470,9 @@ enum dots_evt_writer_status {
 struct dots_evt_writer_result {
   enum dots_evt_writer_status status;
   enum dots_code code; /**< the code of the requirement, if ILL_FORMED */
-  size_t size;         /**< the number of octets written */
+  /** the event's octets: in out, or a chunk's own; NULL if refused */
+  const unsigned char *octets;
+  size_t size; /**< the number of octets at octets */
 };
 
 /** The state of a writer: private, it may change at any time. */
@@ -499,10 +505,11 @@ void dots_evt_writer_init(struct dots_evt_writer *writer);
  *
  * @param writer the writer
  * @param event the event
- * @param[out] out where its octets go
- * @param capacity the number of octets out holds: DOTS_EVT_WRITER_MAX for
- *        any event but a chunk, which needs its size
- * @return DOTS_EVT_WRITER_OK and the octets written, or a refusal
+ * @param[out] out where the octets of any event but a chunk go
+ * @param capacity the number of octets out holds: DOTS_EVT_WRITER_MAX is
+ *        enough for any event; a chunk uses none
+ * @return DOTS_EVT_WRITER_OK and where the event's octets are, or a
+ *         refusal
  */
 struct dots_evt_writer_result
 dots_evt_writer_put(struct dots_evt_writer *writer,
@@ -1667,6 +1674,7 @@ dots_evt_writer_put(struct dots_evt_writer *writer,
   unsigned char encoded[DOTS_EVT_WRITER_MAX];
   const unsigned char *octets = encoded;
   struct dots_evt_reader reader;
+  bool chunk = event->type == DOTS_EVT_EVENT_CHUNK;
   size_t size;
   size_t i;
 
@@ -1674,7 +1682,7 @@ dots_evt_writer_put(struct dots_evt_writer *writer,
     result.status = DOTS_EVT_WRITER_OUT_OF_ORDER;
     return result;
   }
-  if (event->type == DOTS_EVT_EVENT_CHUNK) {
+  if (chunk) {
     if (event->chunk.size > prv->reader.prv.run.data_left) {
       result.status = DOTS_EVT_WRITER_PAST_COUNT;
       return result;
@@ -1684,7 +1692,7 @@ dots_evt_writer_put(struct dots_evt_writer *writer,
   } else {
     size = dots_detail_evt_encode(event, encoded);
   }
-  if (size > capacity) {
+  if (!chunk && size > capacity) {
     result.status = DOTS_EVT_WRITER_NO_SPACE;
     return result;
   }
@@ -1699,9 +1707,13 @@ dots_evt_writer_put(struct dots_evt_writer *writer,
   }
   prv->reader = reader;
   prv->frame = event->type == DOTS_EVT_EVENT_FRAME && !event->clear;
-  for (i = 0; i < size; ++i) {
-    out[i] = octets[i];
+  if (!chunk) {
+    for (i = 0; i < size; ++i) {
+      out[i] = octets[i];
+    }
+    octets = out;
   }
+  result.octets = octets;
   result.size = size;
   return result;
 }
@@ -2091,7 +2103,7 @@ void dots_mdl_release_frame(struct dots_mdl_source *source,
  * Writes an event and puts its octets.
  *
  * @param prv the sink's state
- * @param event the event: a chunk of at most DOTS_EVT_WRITER_MAX octets
+ * @param event the event
  * @return the result: ILL_FORMED with the writer's code
  */
 static struct dots_mdl_result
@@ -2109,12 +2121,12 @@ dots_detail_mdl_put(struct dots_detail_mdl_sink_prv *prv,
     return result;
   }
   if (written.status != DOTS_EVT_WRITER_OK) {
-    /* not reached: events in order, chunks within their run and out */
+    /* not reached: events in order, each run's data in one chunk */
     result.status = DOTS_MDL_OUT_OF_ORDER;
     return result;
   }
   for (i = 0; i < written.size; ++i) {
-    if (prv->output.put(out[i], prv->output.handle) != 0) {
+    if (prv->output.put(written.octets[i], prv->output.handle) != 0) {
       result.status = DOTS_MDL_IO_FAILED;
       return result;
     }
@@ -2137,25 +2149,17 @@ dots_detail_mdl_put_layer(struct dots_detail_mdl_sink_prv *prv,
   struct dots_mdl_result result = dots_detail_mdl_result(DOTS_MDL_OK);
 
   for (; run != NULL && result.status == DOTS_MDL_OK; run = run->next) {
-    const unsigned char *data = run->data;
-    uint64_t left = run->count;
-
     event.type = DOTS_EVT_EVENT_RUN;
     event.run.text = text;
     event.run.x = run->position.x;
     event.run.y = run->position.y;
     event.run.count = run->count;
     result = dots_detail_mdl_put(prv, &event);
-    event.type = DOTS_EVT_EVENT_CHUNK;
-    while (left > 0 && result.status == DOTS_MDL_OK) {
-      size_t size =
-          left < DOTS_EVT_WRITER_MAX ? (size_t)left : DOTS_EVT_WRITER_MAX;
-
-      event.chunk.octets = data;
-      event.chunk.size = size;
+    if (result.status == DOTS_MDL_OK && run->count > 0) {
+      event.type = DOTS_EVT_EVENT_CHUNK;
+      event.chunk.octets = run->data;
+      event.chunk.size = (size_t)run->count; /* its data is in memory */
       result = dots_detail_mdl_put(prv, &event);
-      data += size;
-      left -= size;
     }
   }
   if (result.status == DOTS_MDL_OK) {
