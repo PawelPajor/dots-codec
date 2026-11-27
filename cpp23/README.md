@@ -87,3 +87,10 @@ when it configures them; the library itself does not depend on them.
 ctest --test-dir build -R '^acceptance/' # one test per case of the validation suite
 ctest --test-dir build -R '^unit/'       # one test per test case of tests/test_dots.cpp
 ```
+
+---
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-dark.png">
+  <img alt="Logo" src="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-light.png">
+</picture>
