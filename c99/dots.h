@@ -722,9 +722,7 @@ struct dots_mdl_result dots_mdl_open_source(struct dots_mdl_source *source,
 /**
  * Reads the next frame, with every run. On DOTS_MDL_OK the caller owns
  * the frame and releases it with dots_mdl_release_frame. On any other
- * status there is no frame: the source frees what it had allocated. A
- * count above what its row can hold is never allocated: the reader
- * reports the error.
+ * status there is no frame: the source frees what it had allocated.
  *
  * @param source the source
  * @param[out] frame the frame, or NULL
@@ -1842,27 +1840,20 @@ static void dots__release_runs(struct dots_mdl_run *run,
 }
 
 /**
- * Allocates a run, unless its count is above what its row can hold
- * (DEC-5): then the reader reports the error, and the run is NULL.
+ * Allocates a run, from its count alone: the reader checks its data
+ * against its row (DEC-5) as the data arrives.
  *
  * @param prv the source's state
  * @param head the start of the run
- * @param[out] run the run, its data not yet read, or NULL
+ * @param[out] run the run, its data not yet read
  * @return the result: NO_MEMORY or OK
  */
 static struct dots_mdl_result
 dots__mdl_new_run(struct dots__mdl_source_prv *prv,
                   const struct dots_evt_run *head, struct dots_mdl_run **run) {
-  uint64_t cells = prv->reader.prv.header.dimensions.x - head->x;
   uint64_t count = head->count;
-  bool fits =
-      head->text ? count / 4 + (count % 4 != 0) <= cells : count <= cells;
   struct dots_mdl_run *made;
 
-  *run = NULL;
-  if (!fits) {
-    return dots__mdl_result(DOTS_MDL_OK);
-  }
   if ((uint64_t)(size_t)count != count) {
     return dots__mdl_result(DOTS_MDL_NO_MEMORY);
   }
@@ -1916,7 +1907,7 @@ dots__mdl_read_frame(struct dots__mdl_source_prv *prv, bool clear,
   struct dots_mdl_frame *made =
       (struct dots_mdl_frame *)prv->allocator.allocate(sizeof *made);
   struct dots_mdl_run **tail;
-  struct dots_mdl_run *run = NULL; /* the run read, or NULL to drop its data */
+  struct dots_mdl_run *run = NULL; /* the run read */
   size_t filled = 0;
   struct dots_evt_event event;
   struct dots_mdl_result result;
@@ -1942,12 +1933,10 @@ dots__mdl_read_frame(struct dots__mdl_source_prv *prv, bool clear,
       if (result.status != DOTS_MDL_OK) {
         break;
       }
-      if (run != NULL) {
-        *tail = run;
-        tail = &run->next;
-      }
+      *tail = run;
+      tail = &run->next;
       filled = 0;
-    } else if (event.type == DOTS_EVT_EVENT_CHUNK && run != NULL) {
+    } else if (event.type == DOTS_EVT_EVENT_CHUNK) {
       size_t i;
 
       for (i = 0; i < event.chunk.size; ++i) {

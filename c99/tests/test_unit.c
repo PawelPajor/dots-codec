@@ -1058,14 +1058,10 @@ static struct memory memory_of(const unsigned char *octets, size_t size) {
 static size_t blocks_held;
 static size_t allocations;
 static size_t fail_from;
-static size_t largest;
 
 static void *counting_allocate(size_t size) {
   void *pointer;
 
-  if (size > largest) {
-    largest = size;
-  }
   if (allocations >= fail_from) {
     return NULL;
   }
@@ -1091,7 +1087,6 @@ static void counting_reset(size_t fail) {
   blocks_held = 0;
   allocations = 0;
   fail_from = fail;
-  largest = 0;
 }
 
 /* The example of the main page: "Hi" at the top left of 16 x 4. */
@@ -1248,11 +1243,14 @@ TEST model_ill_formed(void) {
   PASS();
 }
 
-/* A count above what its row holds is never allocated (DEC-5). */
-TEST model_count_above_row(void) {
-  static const unsigned char blocks[] = {
-      0x64, 0x6F, 0x74, 0x73, 0x00, 0x01, 0x00, 0x01, 0x10, 0x04, 0x0A,
-      0x01, 0x02, 0x0F, 0x00, 0x80, 0x80, 0x80, 0x80, 0x10, 0x01, 0x02};
+/*
+ * A run past its row is allocated from its count, and the reader
+ * reports the first block or character outside the grid (DEC-5).
+ */
+TEST model_run_past_row(void) {
+  static const unsigned char blocks[] = {0x64, 0x6F, 0x74, 0x73, 0x00, 0x01,
+                                         0x00, 0x01, 0x10, 0x04, 0x0A, 0x01,
+                                         0x02, 0x0F, 0x00, 0x03, 0x01, 0x02};
   static const unsigned char text[] = {0x64, 0x6F, 0x74, 0x73, 0x00, 0x01, 0x00,
                                        0x01, 0x10, 0x04, 0x0A, 0x01, 0xFE, 0x02,
                                        0x0F, 0x00, 0x05, 0x41, 0x42};
@@ -1269,7 +1267,7 @@ TEST model_count_above_row(void) {
   ASSERT_EQ(DOTS_MDL_ILL_FORMED, result.status);
   ASSERT_EQ(DOTS_OUTSIDE_GRID, result.code);
   ASSERT_EQ(sizeof blocks - 1, result.offset);
-  ASSERT_EQ(sizeof(struct dots_mdl_frame), largest); /* the frame only */
+  ASSERT_EQ(3, allocations); /* the frame, the run and its data */
   ASSERT_EQ(0, blocks_held);
   memory = memory_of(text, sizeof text);
   counting_reset(SIZE_MAX);
@@ -1277,7 +1275,8 @@ TEST model_count_above_row(void) {
   result = dots_mdl_get_frame(&source, &frame);
   ASSERT_EQ(DOTS_MDL_ILL_FORMED, result.status);
   ASSERT_EQ(DOTS_OUTSIDE_GRID, result.code);
-  ASSERT_EQ(sizeof(struct dots_mdl_frame), largest);
+  ASSERT_EQ(sizeof text - 1, result.offset);
+  ASSERT_EQ(3, allocations);
   ASSERT_EQ(0, blocks_held);
   PASS();
 }
@@ -1419,7 +1418,7 @@ SUITE(model) {
   RUN_TEST(model_write);
   RUN_TEST(model_round_trip);
   RUN_TEST(model_ill_formed);
-  RUN_TEST(model_count_above_row);
+  RUN_TEST(model_run_past_row);
   RUN_TEST(model_no_memory);
   RUN_TEST(model_io_failed);
   RUN_TEST(model_sink_ill_formed);
