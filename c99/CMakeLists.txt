@@ -40,8 +40,24 @@ if(PROJECT_IS_TOP_LEVEL)
     set(DOXYGEN_PROJECT_LOGO ${DOTS_LOGO}/dots-pixels-dark.png)
     set(DOXYGEN_HTML_EXTRA_FILES
       ${DOTS_LOGO}/dots-braille-dark.png ${DOTS_LOGO}/dots-braille-light.png)
+    set(DOXYGEN_EXAMPLE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/examples)
     doxygen_add_docs(docs dots.h)
   endif()
+
+  # A program in strict C99, with warnings as errors, using dots.h.
+  function(dots_strict_c99 target)
+    target_link_libraries(${target} PRIVATE dots::c99)
+    set_target_properties(${target} PROPERTIES
+      C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    if(MSVC)
+      target_compile_options(${target} PRIVATE /W4 /WX)
+      target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    else()
+      target_compile_options(${target} PRIVATE -Wall -Wextra -pedantic -Werror)
+    endif()
+  endfunction()
+
+  add_subdirectory(examples)
 endif()
 
 if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
@@ -67,19 +83,11 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
     target_compile_definitions(tomlc17 PRIVATE _CRT_SECURE_NO_WARNINGS)
   endif()
 
-  # A test program in strict C99, with warnings as errors.
+  # A test program.
   function(dots_test name)
     add_executable(${name} tests/${name}.c)
-    target_link_libraries(${name} PRIVATE dots::c99)
+    dots_strict_c99(${name})
     target_include_directories(${name} PRIVATE ${greatest_SOURCE_DIR})
-    set_target_properties(${name} PROPERTIES
-      C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-    if(MSVC)
-      target_compile_options(${name} PRIVATE /W4 /WX)
-      target_compile_definitions(${name} PRIVATE _CRT_SECURE_NO_WARNINGS)
-    else()
-      target_compile_options(${name} PRIVATE -Wall -Wextra -pedantic -Werror)
-    endif()
   endfunction()
 
   dots_test(test_unit)

@@ -43,100 +43,33 @@
  * header, dots.h: no dependencies. See dots.h for how to include it.
  *
  * The @ref model "model level" reads and writes whole frames, with
- * memory from the caller. The rest of this page is the event level,
- * which allocates nothing.
+ * memory from the caller. The event level reads and writes a stream
+ * @ref events "event by event" and allocates nothing: a
+ * @ref reader "reader", a @ref writer "writer", and a
+ * @ref composer "composer" that keeps the state of the grid.
  *
- * Both directions use the same @ref events "events": a header, then
- * frames, each a block layer and a text layer of runs, then the end of
- * the stream.
+ * Examples:
  *
- * To play a stream:
- *
- * 1. Feed its octets to a @ref reader "reader", which gives one event
- *    per call.
- * 2. On the header, start a @ref composer "composer" with cells for
- *    columns * rows.
- * 3. Give it every later event. On each end of text, the cells hold
- *    the frame to show: a cell's character, else its block, as
- *    dots_braille.
- *
- * @code
- * dots_evt_reader_init(&reader);
- * while (size > 0) {
- *   size_t used = dots_evt_reader_feed(&reader, data, size, &event);
- *
- *   data += used;
- *   size -= used;
- *   if (event.type == DOTS_EVT_EVENT_HEADER) {
- *     dots_evt_composer_init(&composer, &event.header, cells, count);
- *   } else {
- *     dots_evt_composer_apply(&composer, &event);
- *   }
- *   if (event.type == DOTS_EVT_EVENT_END_OF_TEXT) {
- *     ... show cells ...
- *   }
- *   ... stop on DOTS_EVT_EVENT_END_OF_STREAM or DOTS_EVT_EVENT_ERROR ...
- * }
- * dots_evt_reader_finish(&reader, &event);
- * @endcode
- *
- * To make a stream, give the same events in order to a
- * @ref writer "writer", which encodes each one or refuses it. Here,
- * "Hi" at the top left of a grid of 16 x 4 cells:
- *
- * @code
- * static void put(const struct dots_evt_event *event) {
- *   unsigned char octets[DOTS_EVT_WRITER_MAX];
- *   struct dots_evt_writer_result result =
- *       dots_evt_writer_put(&writer, event, octets, sizeof octets);
- *
- *   ... stop unless result.status is DOTS_EVT_WRITER_OK ...
- *   memcpy(out + size, result.octets, result.size);
- *   size += result.size;
- * }
- *
- * memset(&event, 0, sizeof event);
- * dots_evt_writer_init(&writer);
- * event.type = DOTS_EVT_EVENT_HEADER;
- * event.header.version.major = DOTS_SPEC_MAJOR;
- * event.header.version.minor = DOTS_SPEC_MINOR;
- * event.header.flags = 1; // contains-text
- * event.header.dimensions.x = 16;
- * event.header.dimensions.y = 4;
- * event.header.frame_rate = 10;
- * put(&event);
- * event.type = DOTS_EVT_EVENT_FRAME;
- * event.clear = true;
- * put(&event);
- * event.type = DOTS_EVT_EVENT_END_OF_BLOCKS; // no blocks
- * put(&event);
- * event.type = DOTS_EVT_EVENT_RUN;
- * event.run.text = true;
- * event.run.x = 0;
- * event.run.y = 0;
- * event.run.count = 2;
- * put(&event);
- * event.type = DOTS_EVT_EVENT_CHUNK;
- * event.chunk.octets = (const unsigned char *)"Hi";
- * event.chunk.size = 2;
- * put(&event);
- * event.type = DOTS_EVT_EVENT_END_OF_TEXT;
- * put(&event);
- * event.type = DOTS_EVT_EVENT_END_OF_STREAM;
- * put(&event);
- * @endcode
- *
- * The writer ignores the members an event's type does not name, so one
- * event can be reused. out now holds the 21 octets of the stream:
- *
- * @code
- * 64 6F 74 73 00 01 00 01 10 04 0A   header: "dots", 0.1.0, flags, 16 x 4, 10
- * 01                                 frame, starting with a clear
- * FE                                 end of blocks
- * 02 00 00 02 48 69                  text run at (0, 0), 2 octets: "Hi"
- * FD                                 end of text
- * FF                                 end of stream
- * @endcode
+ * - @ref model_read.c reads a stream and prints each frame.
+ * - @ref model_write.c writes a stream of three frames.
+ * - @ref event_read.c is model_read.c at the event level.
+ * - @ref event_write.c is model_write.c at the event level: the same octets.
+ */
+/**
+ * @example model_read.c
+ * Reads a stream at the model level and prints each frame.
+ */
+/**
+ * @example model_write.c
+ * Writes a stream of three frames at the model level.
+ */
+/**
+ * @example event_read.c
+ * Reads a stream at the event level and prints each frame.
+ */
+/**
+ * @example event_write.c
+ * Writes a stream of three frames at the event level.
  */
 
 #ifndef DOTS_H
