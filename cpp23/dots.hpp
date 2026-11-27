@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 Pawel Pajor
-//
-// dots.hpp: reader and writer of DOTS streams, in C++23.
-//
-// The unit is a frame. A decoder reads frames, one at a time, from octets
-// fed to it in pieces of any size, an encoder writes frames to an output
-// iterator, and a composer applies frames to the state of the grid. Nothing
-// throws: every failure is an error, in a std::expected. Names in dots::detail
-// are not part of the interface, and may change at any time.
+
+/// @file dots.hpp
+/// Reader and writer of DOTS streams, in C++23.
+///
+/// The unit is a frame. A decoder reads frames, one at a time, from octets
+/// fed to it in pieces of any size, an encoder writes frames to an output
+/// iterator, and a composer applies frames to the state of the grid.
+/// Nothing throws: every failure is an error, in a std::expected. Names in
+/// dots::detail are not part of the interface, and may change at any time.
 
 #ifndef DOTS_HPP
 #define DOTS_HPP
@@ -28,14 +29,16 @@
 
 namespace dots {
 
-// The major and minor version a stream carries (HDR-1).
+/// The major version a stream carries (HDR-1).
 inline constexpr std::uint64_t spec_major = 0;
+
+/// The minor version a stream carries (HDR-1).
 inline constexpr std::uint64_t spec_minor = 1;
 
-// Result codes: the non-negative ones with the values of the
-// specification, the negative ones for failures it leaves out (ERR-4).
+/// Result codes: the non-negative ones with the values of the
+/// specification, the negative ones for failures it leaves out (ERR-4).
 enum class code : std::int8_t {
-  out_of_order = -1, // a call the state of the object does not allow
+  out_of_order = -1, ///< a call the state of the object does not allow
   ok = 0,
   unsupported_version = 1,
   invalid_value = 2,
@@ -45,12 +48,15 @@ enum class code : std::int8_t {
   malformed = 6,
   overflow = 7,
   invalid_text = 8,
-  // Not yet in the specification, which is to require that the grid has
-  // at most 2^64 - 1 cells: columns * rows does not overflow.
+  /// TOO_LARGE. Not yet in the specification, which is to require that the
+  /// grid has at most 2^64 - 1 cells: columns * rows does not overflow.
   too_large = 9,
 };
 
-// The name of a code, as the specification writes it, or empty if unknown.
+/// The name of a code, as the specification writes it.
+///
+/// @param c a code
+/// @return its name, or empty if the code is unknown
 constexpr auto code_name(code c) noexcept -> std::string_view {
   switch (c) {
   case code::out_of_order:
@@ -79,16 +85,16 @@ constexpr auto code_name(code c) noexcept -> std::string_view {
   return {};
 }
 
-// 2D coordinates (Section 4.4).
+/// 2D coordinates (Section 4.4).
 struct coordinate_2d {
-  std::uint64_t x;
-  std::uint64_t y;
+  std::uint64_t x; ///< the column
+  std::uint64_t y; ///< the row
 
   friend auto operator==(const coordinate_2d &, const coordinate_2d &)
       -> bool = default;
 };
 
-// A version (Section 4.3).
+/// A version (Section 4.3).
 struct version {
   std::uint64_t major;
   std::uint64_t minor;
@@ -97,61 +103,65 @@ struct version {
   friend auto operator==(const version &, const version &) -> bool = default;
 };
 
-// The header of a stream (Section 5). Bit 0 of flags is contains-text.
+/// The header of a stream (Section 5).
 struct header {
   version dots_version;
-  std::uint64_t flags;
-  coordinate_2d dimensions; // columns, rows
+  std::uint64_t flags;      ///< bit 0: contains-text
+  coordinate_2d dimensions; ///< columns, rows
   std::uint64_t frame_rate;
 
   friend auto operator==(const header &, const header &) -> bool = default;
 };
 
-// A failure: its code, and where. For a decoder, the offset in the stream
-// (Section 8); for an encoder, the number of octets it has written; for a
-// composer, which has no stream, always 0.
+/// A failure: its code, and where.
 struct error {
   code reason;
+  /// For a decoder, the offset in the stream (Section 8); for an encoder,
+  /// the number of octets it has written; for a composer, which has no
+  /// stream, always 0.
   std::uint64_t offset;
 
   friend auto operator==(const error &, const error &) -> bool = default;
 };
 
-// A run of the block layer: one block per octet.
+/// A run of the block layer.
 struct block_run {
-  coordinate_2d position;
-  std::vector<std::uint8_t> blocks;
+  coordinate_2d position;           ///< the cell of the first block
+  std::vector<std::uint8_t> blocks; ///< one block per octet
 
   friend auto operator==(const block_run &, const block_run &)
       -> bool = default;
 };
 
-// A run of the text layer: UTF-8.
+/// A run of the text layer.
 struct text_run {
-  coordinate_2d position;
-  std::string text;
+  coordinate_2d position; ///< the cell of the first character
+  std::string text;       ///< UTF-8
 
   friend auto operator==(const text_run &, const text_run &) -> bool = default;
 };
 
-// A frame, as the stream holds it: what changes, not the state.
+/// A frame, as the stream holds it: what changes, not the state.
 struct frame {
-  bool clear;
-  std::vector<block_run> block_layer;
-  std::vector<text_run> text_layer;
+  bool clear;                         ///< the frame starts with a clear
+  std::vector<block_run> block_layer; ///< the runs of the block layer
+  std::vector<text_run> text_layer;   ///< the runs of the text layer
 
   friend auto operator==(const frame &, const frame &) -> bool = default;
 };
 
-// A cell of the state.
+/// A cell of the state.
 struct cell {
-  char32_t character; // 0 if it has none
+  char32_t character; ///< 0 if it has none
   std::uint8_t block;
 
   friend auto operator==(const cell &, const cell &) -> bool = default;
 };
 
-// The Braille pattern of a block (Section 5 of dots-content.md).
+/// The Braille pattern of a block (Section 5 of dots-content.md).
+///
+/// @param block a block
+/// @return its Braille pattern, U+2800 to U+28FF
 constexpr auto braille(std::uint8_t block) -> char32_t {
   constexpr std::uint8_t added[] = {0x01, 0x08, 0x02, 0x10,
                                     0x04, 0x20, 0x40, 0x80};
@@ -324,19 +334,22 @@ constexpr auto check(const header &h, const frame &f) -> code {
 
 } // namespace detail
 
-// What a call of decoder::feed read.
+/// What a call of decoder::feed read.
 struct fed {
-  std::size_t used;               // octets of the input read
-  std::optional<frame> completed; // the frame that ended at the last of them
+  std::size_t used;               ///< octets of the input read
+  std::optional<frame> completed; ///< the frame that ended at the last of them
 };
 
-// Reads a stream fed in pieces of any size, in order.
+/// Reads a stream fed in pieces of any size, in order.
 class decoder {
 public:
-  // Reads input up to the end of the next frame, and gives that frame, or
-  // all input and no frame. The rest of the input, input.subspan(used), is
-  // for the next call. After end-of-stream, uses all input and ignores it
-  // (STR-2); after an error, gives it again.
+  /// Reads input up to the end of the next frame, and gives that frame, or
+  /// all input and no frame. The rest of the input, input.subspan(used), is
+  /// for the next call. After end-of-stream, uses all input and ignores it
+  /// (STR-2); after an error, gives it again.
+  ///
+  /// @param input the next octets of the stream
+  /// @return what was read, or the error of the stream
   auto feed(std::span<const std::byte> input) -> std::expected<fed, error> {
     fed result{0, std::nullopt};
 
@@ -358,7 +371,10 @@ public:
     return result;
   }
 
-  // Ends the input: TRUNCATED if the stream has not ended.
+  /// Ends the input.
+  ///
+  /// @return nothing, or TRUNCATED if the stream has not ended, or the
+  /// error of the stream
   auto finish() -> std::expected<void, error> {
     if (state_ != state::ended && state_ != state::failed) {
       fail(code::truncated, offset_);
@@ -369,7 +385,9 @@ public:
     return {};
   }
 
-  // The header, once read.
+  /// The header of the stream.
+  ///
+  /// @return the header, once read
   auto stream_header() const noexcept -> const std::optional<header> & {
     return header_;
   }
@@ -638,12 +656,18 @@ private:
   }
 };
 
-// Writes a stream: start, then put for each frame, then finish. Each call
-// checks its input whole before writing, so a refused call writes nothing
-// and changes nothing.
+/// Writes a stream: start, then put for each frame, then finish. Each call
+/// checks its input whole before writing, so a refused call writes nothing
+/// and changes nothing. A call out of that order is refused with
+/// OUT_OF_ORDER.
 class encoder {
 public:
-  // Writes the header.
+  /// Writes the header.
+  ///
+  /// @tparam O the type of the output iterator
+  /// @param h the header
+  /// @param out where to write
+  /// @return out past the octets written, or the error
   template <std::output_iterator<std::byte> O>
   auto start(const header &h, O out) -> std::expected<O, error> {
     if (state_ != state::initial) {
@@ -666,7 +690,12 @@ public:
     return write_leb128(h.frame_rate, std::move(out));
   }
 
-  // Writes a frame.
+  /// Writes a frame.
+  ///
+  /// @tparam O the type of the output iterator
+  /// @param f the frame
+  /// @param out where to write
+  /// @return out past the octets written, or the error
   template <std::output_iterator<std::byte> O>
   auto put(const frame &f, O out) -> std::expected<O, error> {
     if (state_ != state::started) {
@@ -688,7 +717,11 @@ public:
     return write(detail::token_end_of_text, std::move(out));
   }
 
-  // Writes end-of-stream.
+  /// Writes end-of-stream.
+  ///
+  /// @tparam O the type of the output iterator
+  /// @param out where to write
+  /// @return out past the octet written, or the error
   template <std::output_iterator<std::byte> O>
   auto finish(O out) -> std::expected<O, error> {
     if (state_ != state::started) {
@@ -737,12 +770,15 @@ private:
   }
 };
 
-// The state of the grid (Section 6 of dots-content.md), frame by frame.
-// Move-only: it owns the cells.
+/// The state of the grid (Section 6 of dots-content.md), frame by frame.
+/// Move-only: it owns the cells.
 class composer {
 public:
-  // The initial state: TOO_LARGE if the cells do not fit in memory, or the
-  // error of a header that breaks a stream requirement.
+  /// The initial state.
+  ///
+  /// @param h the header of the stream
+  /// @return the composer, or TOO_LARGE if the cells do not fit in memory,
+  /// or the error of a header that breaks a stream requirement
   static auto create(const header &h) -> std::expected<composer, error> {
     if (const code c = detail::check(h); c != code::ok) {
       return std::unexpected(error{c, 0});
@@ -764,7 +800,11 @@ public:
     return composer(h, std::move(cells), size);
   }
 
-  // Applies a frame. A refused frame changes nothing.
+  /// Applies a frame. A refused frame changes nothing.
+  ///
+  /// @param f the frame
+  /// @return nothing, or the error of a frame that breaks a stream
+  /// requirement
   auto apply(const frame &f) -> std::expected<void, error> {
     if (const code c = detail::check(header_, f); c != code::ok) {
       return std::unexpected(error{c, 0});
@@ -788,7 +828,9 @@ public:
     return {};
   }
 
-  // The cells, cell (x, y) at index y * columns + x.
+  /// The cells of the state.
+  ///
+  /// @return the cells, cell (x, y) at index y * columns + x
   auto cells() const noexcept -> std::span<const cell> {
     return {cells_.get(), size_};
   }
