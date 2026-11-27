@@ -70,9 +70,27 @@ cmake -S tests/package -B build-package -DCMAKE_PREFIX_PATH="$PWD/install" \
   && cmake --build build-package && ctest --test-dir build-package  # package check
 ```
 
+## Documentation
+
+With [Doxygen](https://www.doxygen.nl) installed, `cmake --build build --target docs`
+writes the documentation of `dots.hpp` to `build/html/index.html`. A
+documentation error, such as a `@param` naming no parameter, fails
+the build.
+
 ## Tests
+
+The tests use [Catch2](https://github.com/catchorg/Catch2) and
+[toml++](https://github.com/marzer/tomlplusplus), which CMake fetches
+when it configures them; the library itself does not depend on them.
 
 ```sh
 ctest --test-dir build -R '^acceptance/' # one test per case of the validation suite
-ctest --test-dir build -R '^test_dots$'  # the unit tests
+ctest --test-dir build -R '^unit/'       # one test per test case of tests/test_dots.cpp
 ```
+
+---
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-dark.png">
+  <img alt="Logo" src="https://raw.githubusercontent.com/PawelPajor/dots-stream/main/logo/dots-pixels-light.png">
+</picture>

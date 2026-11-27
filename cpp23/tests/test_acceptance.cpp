@@ -4,19 +4,24 @@
 // One stream: test_acceptance <dir> <name>, of the validation suite as
 // accept/name or reject/name, or of the examples. Read whole and octet by
 // octet. A reject case gives the code and offset of its .meta. Any other
-// stream is accepted, composed and compared with its .surface if it has
-// one, and written again: octet for octet the same stream, up to its
-// end-of-stream (STR-2).
+// stream is accepted, with the header of its .meta if it has one, composed
+// and compared with its .surface if it has one, and written again: octet
+// for octet the same stream, up to its end-of-stream (STR-2).
 
 #include "dots.hpp"
 
+#include <toml++/toml.hpp>
+
 #include <algorithm>
+#include <charconv>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -27,26 +32,65 @@ auto read(const std::filesystem::path &path) -> std::string {
   return {std::istreambuf_iterator<char>(in), {}};
 }
 
-// The value of a top-level `key = value` line of a .meta, unquoted.
-auto meta_value(const std::string &meta, const std::string &key)
-    -> std::string {
-  const std::string start = key + " = ";
-  const std::size_t at = meta.find("\n" + start);
+// A string of decimal digits, as a std::uint64_t.
+auto decimal(std::string_view text) -> std::optional<std::uint64_t> {
+  const char *const end = text.data() + text.size();
+  std::uint64_t value = 0;
+  const auto [at, ec] = std::from_chars(text.data(), end, value);
 
-  if (at == std::string::npos) {
-    return {};
-  }
-
-  const std::size_t from = at + 1 + start.size();
-  std::string value = meta.substr(from, meta.find('\n', from) - from);
-
-  if (value.ends_with('\r')) { // TOML allows CRLF line ends
-    value.pop_back();
-  }
-  if (value.size() >= 2 && value.front() == '"') {
-    value = value.substr(1, value.size() - 2);
+  if (ec != std::errc{} || at != end) {
+    return std::nullopt;
   }
   return value;
+}
+
+// dots-version: "major.minor.update".
+auto version(std::string_view text) -> std::optional<dots::version> {
+  std::uint64_t parts[3] = {};
+
+  for (int i = 0; i < 3; ++i) {
+    const std::size_t dot = i < 2 ? text.find('.') : text.size();
+
+    if (dot == std::string_view::npos) {
+      return std::nullopt;
+    }
+
+    const auto part = decimal(text.substr(0, dot));
+
+    if (!part) {
+      return std::nullopt;
+    }
+    parts[i] = *part;
+    text.remove_prefix(i < 2 ? dot + 1 : dot);
+  }
+  return dots::version{parts[0], parts[1], parts[2]};
+}
+
+// The [header] of an accept case's .meta.
+auto meta_header(const toml::table &meta) -> std::optional<dots::header> {
+  const toml::node_view<const toml::node> h = meta["header"];
+  const auto dots_version = h["dots-version"].value_exact<std::string>();
+  const auto contains_text = h["contains-text"].value_exact<bool>();
+  const auto columns = h["columns"].value_exact<std::int64_t>();
+  const auto rows = h["rows"].value_exact<std::int64_t>();
+  const auto frame_rate = h["frame-rate"].value_exact<std::string>();
+
+  if (!dots_version || !contains_text || !columns || !rows || !frame_rate ||
+      *columns < 0 || *rows < 0) {
+    return std::nullopt;
+  }
+
+  const auto v = version(*dots_version);
+  const auto rate = decimal(*frame_rate);
+
+  if (!v || !rate) {
+    return std::nullopt;
+  }
+  return dots::header{
+      *v,
+      *contains_text ? 1U : 0U,
+      {static_cast<std::uint64_t>(*columns), static_cast<std::uint64_t>(*rows)},
+      *rate};
 }
 
 auto utf8(char32_t c, std::string &out) -> void {
@@ -156,25 +200,54 @@ auto main(int argc, char **argv) -> int {
   }
 
   const std::filesystem::path base = std::filesystem::path(argv[1]) / argv[2];
+  const std::string name = argv[2];
+  const bool accept = name.starts_with("accept/");
+  const bool reject = name.starts_with("reject/");
+  toml::table meta;
+
+  if (accept || reject) {
+    try {
+      meta = toml::parse_file(base.string() + ".meta");
+    } catch (const toml::parse_error &e) {
+      return fail(".meta: " + std::string(e.description()));
+    }
+  }
+
   const std::string bytes = read(base.string() + ".dots");
   const std::span<const std::byte> stream = std::as_bytes(std::span(bytes));
-  const std::string meta = read(base.string() + ".meta");
   const outcome whole = decode(stream, stream.size() + 1);
 
   if (decode(stream, 1) != whole) {
     return fail("octet by octet differs from whole");
   }
-  if (std::string(argv[2]).starts_with("reject/")) {
+  if (reject) {
     const std::string got = std::string(dots::code_name(whole.result.reason)) +
                             " at " + std::to_string(whole.result.offset);
-    const std::string want =
-        meta_value(meta, "code") + " at " + meta_value(meta, "offset");
+    const auto code = meta["code"].value_exact<std::string>();
+    const auto offset = meta["offset"].value_exact<std::int64_t>();
+
+    if (!code || !offset || *offset < 0 || meta.contains("header")) {
+      return fail("a reject case's .meta without a well-formed code and "
+                  "offset");
+    }
+
+    const std::string want = *code + " at " + std::to_string(*offset);
 
     return got == want ? 0 : fail(got + ", want " + want);
   }
   if (whole.result.reason != dots::code::ok) {
     return fail(std::string(dots::code_name(whole.result.reason)) + " at " +
                 std::to_string(whole.result.offset));
+  }
+  if (accept) {
+    const auto want = meta_header(meta);
+
+    if (!want || meta.contains("code")) {
+      return fail("an accept case's .meta without a well-formed [header]");
+    }
+    if (whole.header != want) {
+      return fail("header differs");
+    }
   }
   if (std::filesystem::exists(base.string() + ".surface") &&
       surface(whole) != read(base.string() + ".surface")) {
