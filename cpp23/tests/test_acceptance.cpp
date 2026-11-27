@@ -40,6 +40,9 @@ auto meta_value(const std::string &meta, const std::string &key)
   const std::size_t from = at + 1 + start.size();
   std::string value = meta.substr(from, meta.find('\n', from) - from);
 
+  if (value.ends_with('\r')) { // TOML allows CRLF line ends
+    value.pop_back();
+  }
   if (value.size() >= 2 && value.front() == '"') {
     value = value.substr(1, value.size() - 2);
   }
