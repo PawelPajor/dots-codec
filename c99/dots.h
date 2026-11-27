@@ -1887,6 +1887,22 @@ dots__mdl_new_run(struct dots__mdl_source_prv *prv,
 }
 
 /**
+ * Sets every member of a frame.
+ *
+ * @param frame the frame
+ * @param clear the frame starts with a clear
+ * @param block_runs the first run of the block layer, or NULL
+ * @param text_runs the first run of the text layer, or NULL
+ */
+static void dots__mdl_init_frame(struct dots_mdl_frame *frame, bool clear,
+                                 struct dots_mdl_run *block_runs,
+                                 struct dots_mdl_run *text_runs) {
+  frame->clear = clear;
+  frame->blocks.runs = block_runs;
+  frame->text.runs = text_runs;
+}
+
+/**
  * Reads a frame after its start, up to its end of text.
  *
  * @param prv the source's state
@@ -1908,9 +1924,7 @@ dots__mdl_read_frame(struct dots__mdl_source_prv *prv, bool clear,
   if (made == NULL) {
     return dots__mdl_result(DOTS_MDL_NO_MEMORY);
   }
-  made->clear = clear;
-  made->blocks.runs = NULL;
-  made->text.runs = NULL;
+  dots__mdl_init_frame(made, clear, NULL, NULL);
   tail = &made->blocks.runs;
   for (;;) {
     result = dots__mdl_next(prv, &event);
