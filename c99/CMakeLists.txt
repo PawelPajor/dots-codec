@@ -30,8 +30,7 @@ if(PROJECT_IS_TOP_LEVEL)
   # The documentation of dots.h, built by the docs target.
   find_package(Doxygen)
   if(DOXYGEN_FOUND)
-    set(DOXYGEN_EXCLUDE_SYMBOLS dots__* DOTS__* dots_evt__* DOTS_EVT__*
-      dots_mdl__* DOTS_MDL__* *_prv prv)
+    set(DOXYGEN_EXCLUDE_SYMBOLS dots_detail_* DOTS_DETAIL_* *_prv prv)
     set(DOXYGEN_WARN_IF_UNDOCUMENTED NO)
     set(DOXYGEN_WARN_AS_ERROR FAIL_ON_WARNINGS)
     set(DOXYGEN_GENERATE_LATEX NO)

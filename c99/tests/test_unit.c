@@ -194,7 +194,7 @@ SUITE(reader) {
 static struct dots_evt_event header_event(uint64_t major, uint64_t minor,
                                           uint64_t flags, uint64_t columns,
                                           uint64_t rows) {
-  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_evt_event event = DOTS_DETAIL_ZERO;
 
   event.type = DOTS_EVT_EVENT_HEADER;
   event.header.version.major = major;
@@ -207,7 +207,7 @@ static struct dots_evt_event header_event(uint64_t major, uint64_t minor,
 }
 
 static struct dots_evt_event frame_event(bool clear) {
-  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_evt_event event = DOTS_DETAIL_ZERO;
 
   event.type = DOTS_EVT_EVENT_FRAME;
   event.clear = clear;
@@ -216,7 +216,7 @@ static struct dots_evt_event frame_event(bool clear) {
 
 static struct dots_evt_event run_event(bool text, uint64_t x, uint64_t y,
                                        uint64_t count) {
-  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_evt_event event = DOTS_DETAIL_ZERO;
 
   event.type = DOTS_EVT_EVENT_RUN;
   event.run.text = text;
@@ -228,7 +228,7 @@ static struct dots_evt_event run_event(bool text, uint64_t x, uint64_t y,
 
 static struct dots_evt_event chunk_event(const unsigned char *octets,
                                          size_t size) {
-  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_evt_event event = DOTS_DETAIL_ZERO;
 
   event.type = DOTS_EVT_EVENT_CHUNK;
   event.chunk.octets = octets;
@@ -237,7 +237,7 @@ static struct dots_evt_event chunk_event(const unsigned char *octets,
 }
 
 static struct dots_evt_event token_event(enum dots_evt_event_type type) {
-  struct dots_evt_event event = DOTS__ZERO;
+  struct dots_evt_event event = DOTS_DETAIL_ZERO;
 
   event.type = type;
   return event;
@@ -582,7 +582,7 @@ TEST writer_then_reader(void) {
   static const unsigned char text[] = {0x41, 0xE2, 0x82, 0xAC,
                                        0xF0, 0x9F, 0x98, 0x80};
   struct dots_evt_event events[16];
-  struct trace written = DOTS__ZERO;
+  struct trace written = DOTS_DETAIL_ZERO;
   unsigned char stream[128];
   struct dots_evt_writer writer;
   size_t count = 0;
@@ -618,7 +618,7 @@ TEST writer_then_reader(void) {
   }
 
   for (chunk = 1; chunk <= size; ++chunk) {
-    struct trace read = DOTS__ZERO;
+    struct trace read = DOTS_DETAIL_ZERO;
     struct dots_evt_reader reader;
     struct dots_evt_event event;
     size_t at = 0;
@@ -663,74 +663,74 @@ struct leb128_case {
   const char *name;
   unsigned char octets[16];
   size_t size;
-  enum dots_evt__leb128_reader_result result;
-  uint64_t value; /* if result is DOTS_EVT__LEB128_READER_DONE */
+  enum dots_detail_evt_leb128_reader_result result;
+  uint64_t value; /* if result is DOTS_DETAIL_EVT_LEB128_READER_DONE */
 };
 
 static const struct leb128_case leb128_cases[] = {
-    {"zero", {0x00}, 1, DOTS_EVT__LEB128_READER_DONE, 0},
-    {"one-octet-max", {0x7F}, 1, DOTS_EVT__LEB128_READER_DONE, 0x7F},
-    {"two-octets", {0x80, 0x01}, 2, DOTS_EVT__LEB128_READER_DONE, 0x80},
+    {"zero", {0x00}, 1, DOTS_DETAIL_EVT_LEB128_READER_DONE, 0},
+    {"one-octet-max", {0x7F}, 1, DOTS_DETAIL_EVT_LEB128_READER_DONE, 0x7F},
+    {"two-octets", {0x80, 0x01}, 2, DOTS_DETAIL_EVT_LEB128_READER_DONE, 0x80},
     {"three-octets",
      {0xE5, 0x8E, 0x26},
      3,
-     DOTS_EVT__LEB128_READER_DONE,
+     DOTS_DETAIL_EVT_LEB128_READER_DONE,
      624485},
     {"zero-groups",
      {0x80, 0x80, 0x80, 0x01},
      4,
-     DOTS_EVT__LEB128_READER_DONE,
+     DOTS_DETAIL_EVT_LEB128_READER_DONE,
      UINT64_C(1) << 21},
     {"bit-63",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01},
      10,
-     DOTS_EVT__LEB128_READER_DONE,
+     DOTS_DETAIL_EVT_LEB128_READER_DONE,
      UINT64_C(1) << 63},
     {"max",
      {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01},
      10,
-     DOTS_EVT__LEB128_READER_DONE,
+     DOTS_DETAIL_EVT_LEB128_READER_DONE,
      UINT64_MAX},
     {"bit-64",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02},
      10,
-     DOTS_EVT__LEB128_READER_OVERFLOW,
+     DOTS_DETAIL_EVT_LEB128_READER_OVERFLOW,
      0},
     {"tenth-octet-max",
      {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F},
      10,
-     DOTS_EVT__LEB128_READER_OVERFLOW,
+     DOTS_DETAIL_EVT_LEB128_READER_OVERFLOW,
      0},
     {"eleventh-octet",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01},
      11,
-     DOTS_EVT__LEB128_READER_OVERFLOW,
+     DOTS_DETAIL_EVT_LEB128_READER_OVERFLOW,
      0},
-    {"zero-tail", {0x80, 0x00}, 2, DOTS_EVT__LEB128_READER_MALFORMED, 0},
+    {"zero-tail", {0x80, 0x00}, 2, DOTS_DETAIL_EVT_LEB128_READER_MALFORMED, 0},
     {"zero-tail-past-tenth",
      {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00},
      12,
-     DOTS_EVT__LEB128_READER_MALFORMED,
+     DOTS_DETAIL_EVT_LEB128_READER_MALFORMED,
      0},
     {"zero-tail-after-overflow",
      {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x82, 0x00},
      11,
-     DOTS_EVT__LEB128_READER_MALFORMED,
+     DOTS_DETAIL_EVT_LEB128_READER_MALFORMED,
      0}};
 
 /* Reads a leb128 at offset 1000, octet by octet. */
 TEST leb128_read(const struct leb128_case *test) {
-  struct dots_evt__leb128_reader leb128 = DOTS__ZERO;
+  struct dots_detail_evt_leb128_reader leb128 = DOTS_DETAIL_ZERO;
   size_t i;
 
   for (i = 0; i + 1 < test->size; ++i) {
-    ASSERT_EQ(DOTS_EVT__LEB128_READER_MORE,
-              dots_evt__leb128_read(&leb128, test->octets[i], 1000 + i));
+    ASSERT_EQ(DOTS_DETAIL_EVT_LEB128_READER_MORE,
+              dots_detail_evt_leb128_read(&leb128, test->octets[i], 1000 + i));
   }
   ASSERT_EQ(test->result,
-            dots_evt__leb128_read(&leb128, test->octets[i], 1000 + i));
+            dots_detail_evt_leb128_read(&leb128, test->octets[i], 1000 + i));
   ASSERT_EQ(1000, leb128.offset);
-  if (test->result == DOTS_EVT__LEB128_READER_DONE) {
+  if (test->result == DOTS_DETAIL_EVT_LEB128_READER_DONE) {
     ASSERT_EQ(test->value, leb128.value);
   }
   PASS();
@@ -740,21 +740,21 @@ TEST leb128_read(const struct leb128_case *test) {
 TEST leb128_write(const struct leb128_case *test) {
   unsigned char octets[10];
 
-  ASSERT_EQ(test->size, dots_evt__leb128_write(test->value, octets));
+  ASSERT_EQ(test->size, dots_detail_evt_leb128_write(test->value, octets));
   ASSERT_MEM_EQ(test->octets, octets, test->size);
   PASS();
 }
 
 /* A leb128 after a complete one starts anew. */
 TEST leb128_in_a_row(void) {
-  struct dots_evt__leb128_reader leb128 = DOTS__ZERO;
+  struct dots_detail_evt_leb128_reader leb128 = DOTS_DETAIL_ZERO;
 
-  ASSERT_EQ(DOTS_EVT__LEB128_READER_MORE,
-            dots_evt__leb128_read(&leb128, 0x80, 0));
-  ASSERT_EQ(DOTS_EVT__LEB128_READER_DONE,
-            dots_evt__leb128_read(&leb128, 0x01, 1));
-  ASSERT_EQ(DOTS_EVT__LEB128_READER_DONE,
-            dots_evt__leb128_read(&leb128, 0x05, 2));
+  ASSERT_EQ(DOTS_DETAIL_EVT_LEB128_READER_MORE,
+            dots_detail_evt_leb128_read(&leb128, 0x80, 0));
+  ASSERT_EQ(DOTS_DETAIL_EVT_LEB128_READER_DONE,
+            dots_detail_evt_leb128_read(&leb128, 0x01, 1));
+  ASSERT_EQ(DOTS_DETAIL_EVT_LEB128_READER_DONE,
+            dots_detail_evt_leb128_read(&leb128, 0x05, 2));
   ASSERT_EQ(2, leb128.offset);
   ASSERT_EQ(5, leb128.value);
   PASS();
@@ -769,7 +769,7 @@ SUITE(leb128) {
   }
   RUN_TEST(leb128_in_a_row);
   for (i = 0; i < sizeof leb128_cases / sizeof leb128_cases[0]; ++i) {
-    if (leb128_cases[i].result == DOTS_EVT__LEB128_READER_DONE) {
+    if (leb128_cases[i].result == DOTS_DETAIL_EVT_LEB128_READER_DONE) {
       greatest_set_test_suffix(leb128_cases[i].name);
       RUN_TEST1(leb128_write, &leb128_cases[i]);
     }
@@ -784,84 +784,109 @@ struct utf8_case {
   const char *name;
   unsigned char octets[4];
   size_t size;
-  enum dots_evt__utf8_result result;
+  enum dots_detail_evt_utf8_result result;
   unsigned length; /* 0 for an invalid first octet */
   uint32_t character;
 };
 
 static const struct utf8_case utf8_cases[] = {
-    {"one-octet-min", {0x00}, 1, DOTS_EVT__UTF8_DONE, 1, 0},
-    {"one-octet-max", {0x7F}, 1, DOTS_EVT__UTF8_DONE, 1, 0x7F},
-    {"two-octets-min", {0xC2, 0x80}, 2, DOTS_EVT__UTF8_DONE, 2, 0x80},
-    {"two-octets-max", {0xDF, 0xBF}, 2, DOTS_EVT__UTF8_DONE, 2, 0x7FF},
-    {"e0-min", {0xE0, 0xA0, 0x80}, 3, DOTS_EVT__UTF8_DONE, 3, 0x800},
-    {"euro", {0xE2, 0x82, 0xAC}, 3, DOTS_EVT__UTF8_DONE, 3, 0x20AC},
+    {"one-octet-min", {0x00}, 1, DOTS_DETAIL_EVT_UTF8_DONE, 1, 0},
+    {"one-octet-max", {0x7F}, 1, DOTS_DETAIL_EVT_UTF8_DONE, 1, 0x7F},
+    {"two-octets-min", {0xC2, 0x80}, 2, DOTS_DETAIL_EVT_UTF8_DONE, 2, 0x80},
+    {"two-octets-max", {0xDF, 0xBF}, 2, DOTS_DETAIL_EVT_UTF8_DONE, 2, 0x7FF},
+    {"e0-min", {0xE0, 0xA0, 0x80}, 3, DOTS_DETAIL_EVT_UTF8_DONE, 3, 0x800},
+    {"euro", {0xE2, 0x82, 0xAC}, 3, DOTS_DETAIL_EVT_UTF8_DONE, 3, 0x20AC},
     {"before-surrogates",
      {0xED, 0x9F, 0xBF},
      3,
-     DOTS_EVT__UTF8_DONE,
+     DOTS_DETAIL_EVT_UTF8_DONE,
      3,
      0xD7FF},
-    {"after-surrogates", {0xEE, 0x80, 0x80}, 3, DOTS_EVT__UTF8_DONE, 3, 0xE000},
-    {"three-octets-max", {0xEF, 0xBF, 0xBF}, 3, DOTS_EVT__UTF8_DONE, 3, 0xFFFF},
-    {"f0-min", {0xF0, 0x90, 0x80, 0x80}, 4, DOTS_EVT__UTF8_DONE, 4, 0x10000},
-    {"f1", {0xF1, 0x80, 0x80, 0x80}, 4, DOTS_EVT__UTF8_DONE, 4, 0x40000},
+    {"after-surrogates",
+     {0xEE, 0x80, 0x80},
+     3,
+     DOTS_DETAIL_EVT_UTF8_DONE,
+     3,
+     0xE000},
+    {"three-octets-max",
+     {0xEF, 0xBF, 0xBF},
+     3,
+     DOTS_DETAIL_EVT_UTF8_DONE,
+     3,
+     0xFFFF},
+    {"f0-min",
+     {0xF0, 0x90, 0x80, 0x80},
+     4,
+     DOTS_DETAIL_EVT_UTF8_DONE,
+     4,
+     0x10000},
+    {"f1", {0xF1, 0x80, 0x80, 0x80}, 4, DOTS_DETAIL_EVT_UTF8_DONE, 4, 0x40000},
     {"four-octets-max",
      {0xF4, 0x8F, 0xBF, 0xBF},
      4,
-     DOTS_EVT__UTF8_DONE,
+     DOTS_DETAIL_EVT_UTF8_DONE,
      4,
      0x10FFFF},
-    {"lead-80", {0x80}, 1, DOTS_EVT__UTF8_INVALID, 0, 0},
-    {"lead-bf", {0xBF}, 1, DOTS_EVT__UTF8_INVALID, 0, 0},
-    {"lead-c0", {0xC0}, 1, DOTS_EVT__UTF8_INVALID, 0, 0},
-    {"lead-c1", {0xC1}, 1, DOTS_EVT__UTF8_INVALID, 0, 0},
-    {"lead-f5", {0xF5}, 1, DOTS_EVT__UTF8_INVALID, 0, 0},
-    {"lead-ff", {0xFF}, 1, DOTS_EVT__UTF8_INVALID, 0, 0},
-    {"second-below-80", {0xC2, 0x7F}, 2, DOTS_EVT__UTF8_INVALID, 2, 0},
-    {"second-above-bf", {0xC2, 0xC0}, 2, DOTS_EVT__UTF8_INVALID, 2, 0},
-    {"e0-overlong", {0xE0, 0x9F}, 2, DOTS_EVT__UTF8_INVALID, 3, 0},
-    {"surrogate", {0xED, 0xA0}, 2, DOTS_EVT__UTF8_INVALID, 3, 0},
-    {"f0-overlong", {0xF0, 0x8F}, 2, DOTS_EVT__UTF8_INVALID, 4, 0},
-    {"above-10ffff", {0xF4, 0x90}, 2, DOTS_EVT__UTF8_INVALID, 4, 0},
-    {"third-octet", {0xE2, 0x82, 0x41}, 3, DOTS_EVT__UTF8_INVALID, 3, 0},
-    {"fourth-octet", {0xF0, 0x90, 0x80, 0x41}, 4, DOTS_EVT__UTF8_INVALID, 4, 0},
-    {"lead-after-lead", {0xE2, 0xE2}, 2, DOTS_EVT__UTF8_INVALID, 3, 0}};
+    {"lead-80", {0x80}, 1, DOTS_DETAIL_EVT_UTF8_INVALID, 0, 0},
+    {"lead-bf", {0xBF}, 1, DOTS_DETAIL_EVT_UTF8_INVALID, 0, 0},
+    {"lead-c0", {0xC0}, 1, DOTS_DETAIL_EVT_UTF8_INVALID, 0, 0},
+    {"lead-c1", {0xC1}, 1, DOTS_DETAIL_EVT_UTF8_INVALID, 0, 0},
+    {"lead-f5", {0xF5}, 1, DOTS_DETAIL_EVT_UTF8_INVALID, 0, 0},
+    {"lead-ff", {0xFF}, 1, DOTS_DETAIL_EVT_UTF8_INVALID, 0, 0},
+    {"second-below-80", {0xC2, 0x7F}, 2, DOTS_DETAIL_EVT_UTF8_INVALID, 2, 0},
+    {"second-above-bf", {0xC2, 0xC0}, 2, DOTS_DETAIL_EVT_UTF8_INVALID, 2, 0},
+    {"e0-overlong", {0xE0, 0x9F}, 2, DOTS_DETAIL_EVT_UTF8_INVALID, 3, 0},
+    {"surrogate", {0xED, 0xA0}, 2, DOTS_DETAIL_EVT_UTF8_INVALID, 3, 0},
+    {"f0-overlong", {0xF0, 0x8F}, 2, DOTS_DETAIL_EVT_UTF8_INVALID, 4, 0},
+    {"above-10ffff", {0xF4, 0x90}, 2, DOTS_DETAIL_EVT_UTF8_INVALID, 4, 0},
+    {"third-octet", {0xE2, 0x82, 0x41}, 3, DOTS_DETAIL_EVT_UTF8_INVALID, 3, 0},
+    {"fourth-octet",
+     {0xF0, 0x90, 0x80, 0x41},
+     4,
+     DOTS_DETAIL_EVT_UTF8_INVALID,
+     4,
+     0},
+    {"lead-after-lead", {0xE2, 0xE2}, 2, DOTS_DETAIL_EVT_UTF8_INVALID, 3, 0}};
 
 /*
  * Pushes a UTF-8 sequence at offset 1000, octet by octet. The octets
  * before an invalid one stay in the sequence.
  */
 TEST utf8_push(const struct utf8_case *test) {
-  struct dots_evt__utf8 utf8 = DOTS__ZERO;
+  struct dots_detail_evt_utf8 utf8 = DOTS_DETAIL_ZERO;
   size_t kept =
-      test->result == DOTS_EVT__UTF8_DONE ? test->size : test->size - 1;
+      test->result == DOTS_DETAIL_EVT_UTF8_DONE ? test->size : test->size - 1;
   size_t i;
 
   for (i = 0; i + 1 < test->size; ++i) {
-    ASSERT_EQ(DOTS_EVT__UTF8_MORE,
-              dots_evt__utf8_push(&utf8, test->octets[i], 1000 + i));
+    ASSERT_EQ(DOTS_DETAIL_EVT_UTF8_MORE,
+              dots_detail_evt_utf8_push(&utf8, test->octets[i], 1000 + i));
   }
   ASSERT_EQ(test->result,
-            dots_evt__utf8_push(&utf8, test->octets[i], 1000 + i));
+            dots_detail_evt_utf8_push(&utf8, test->octets[i], 1000 + i));
   ASSERT_EQ(1000, utf8.offset);
   ASSERT_EQ(test->length, utf8.length);
   ASSERT_EQ(kept, utf8.size);
   ASSERT_MEM_EQ(test->octets, utf8.octets, kept);
-  if (test->result == DOTS_EVT__UTF8_DONE) {
-    ASSERT_EQ(test->character, dots_evt__utf8_decode(utf8.octets, utf8.length));
+  if (test->result == DOTS_DETAIL_EVT_UTF8_DONE) {
+    ASSERT_EQ(test->character,
+              dots_detail_evt_utf8_decode(utf8.octets, utf8.length));
   }
   PASS();
 }
 
 /* A sequence after a complete one starts anew. */
 TEST utf8_in_a_row(void) {
-  struct dots_evt__utf8 utf8 = DOTS__ZERO;
+  struct dots_detail_evt_utf8 utf8 = DOTS_DETAIL_ZERO;
 
-  ASSERT_EQ(DOTS_EVT__UTF8_MORE, dots_evt__utf8_push(&utf8, 0xE2, 0));
-  ASSERT_EQ(DOTS_EVT__UTF8_MORE, dots_evt__utf8_push(&utf8, 0x82, 1));
-  ASSERT_EQ(DOTS_EVT__UTF8_DONE, dots_evt__utf8_push(&utf8, 0xAC, 2));
-  ASSERT_EQ(DOTS_EVT__UTF8_DONE, dots_evt__utf8_push(&utf8, 0x41, 3));
+  ASSERT_EQ(DOTS_DETAIL_EVT_UTF8_MORE,
+            dots_detail_evt_utf8_push(&utf8, 0xE2, 0));
+  ASSERT_EQ(DOTS_DETAIL_EVT_UTF8_MORE,
+            dots_detail_evt_utf8_push(&utf8, 0x82, 1));
+  ASSERT_EQ(DOTS_DETAIL_EVT_UTF8_DONE,
+            dots_detail_evt_utf8_push(&utf8, 0xAC, 2));
+  ASSERT_EQ(DOTS_DETAIL_EVT_UTF8_DONE,
+            dots_detail_evt_utf8_push(&utf8, 0x41, 3));
   ASSERT_EQ(3, utf8.offset);
   ASSERT_EQ(1, utf8.length);
   ASSERT_EQ(1, utf8.size);
@@ -973,7 +998,7 @@ TEST composer_characters(void) {
 
 /* Too few cells are refused, and left as they are. */
 TEST composer_count(void) {
-  struct dots_header header = DOTS__ZERO;
+  struct dots_header header = DOTS_DETAIL_ZERO;
   struct dots_evt_composer composer;
   struct dots_cell cells[64];
   size_t i;
