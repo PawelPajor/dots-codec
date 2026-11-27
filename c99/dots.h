@@ -707,16 +707,25 @@ int dots_mdl_stdio_put(int octet, void *handle);
 
 /** What a call of a source or a sink did. */
 enum dots_mdl_status {
+
   /** done: a header or frame given, or written */
   DOTS_MDL_OK,
+
   /** get_frame: the stream has ended */
   DOTS_MDL_END,
+
   /** a stream requirement: code */
   DOTS_MDL_ILL_FORMED,
+
   /** allocate gave NULL, or a count above SIZE_MAX */
   DOTS_MDL_NO_MEMORY,
+
   /** get or put gave DOTS_MDL_IO_ERROR */
   DOTS_MDL_IO_FAILED,
+
+  /** get gave a value outside its contract */
+  DOTS_MDL_BAD_INPUT,
+
   /** a call after close_sink */
   DOTS_MDL_OUT_OF_ORDER
 };
@@ -1894,8 +1903,12 @@ dots_detail_mdl_next(struct dots_detail_mdl_source_prv *prv,
         dots_evt_reader_finish(&prv->reader, event);
         break;
       }
-      if (got < 0 || got > 0xFF) {
+      if (got == DOTS_MDL_IO_ERROR) {
         result.status = DOTS_MDL_IO_FAILED;
+        return result;
+      }
+      if (got < 0 || got > 0xFF) {
+        result.status = DOTS_MDL_BAD_INPUT;
         return result;
       }
       prv->octet = got;

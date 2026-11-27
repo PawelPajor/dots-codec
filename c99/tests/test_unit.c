@@ -1109,6 +1109,22 @@ static int memory_put(int octet, void *handle) {
   return 0;
 }
 
+/* An input in memory that gives a bad value at one octet. */
+struct bad_input {
+  struct memory *memory;
+  size_t at;
+  int value;
+};
+
+static int bad_get(void *handle) {
+  struct bad_input *bad = (struct bad_input *)handle;
+
+  if (bad->memory->next == bad->at) {
+    return bad->value;
+  }
+  return memory_get(bad->memory);
+}
+
 static struct memory memory_of(const unsigned char *octets, size_t size) {
   struct memory memory;
 
@@ -1480,6 +1496,30 @@ TEST model_stdio(void) {
   PASS();
 }
 
+/* A value of get outside its contract: BAD_INPUT, final. */
+TEST model_bad_input(void) {
+  static const int values[] = {256, -7};
+  size_t i;
+
+  for (i = 0; i < sizeof values / sizeof values[0]; ++i) {
+    struct memory memory = memory_of(hi_stream, sizeof hi_stream);
+    struct bad_input bad = {&memory, 15, values[i]};
+    struct dots_mdl_input input = {bad_get, &bad};
+    struct dots_mdl_source source;
+    struct dots_header header;
+    struct dots_mdl_frame *frame;
+
+    counting_reset(SIZE_MAX);
+    ASSERT_EQ(DOTS_MDL_OK,
+              dots_mdl_open_source(&source, counting, input, &header).status);
+    ASSERT_EQ(DOTS_MDL_BAD_INPUT, dots_mdl_get_frame(&source, &frame).status);
+    ASSERT_EQ(NULL, frame);
+    ASSERT_EQ(0, blocks_held);
+    ASSERT_EQ(DOTS_MDL_BAD_INPUT, dots_mdl_get_frame(&source, &frame).status);
+  }
+  PASS();
+}
+
 SUITE(model) {
   RUN_TEST(model_read);
   RUN_TEST(model_write);
@@ -1488,6 +1528,7 @@ SUITE(model) {
   RUN_TEST(model_run_past_row);
   RUN_TEST(model_no_memory);
   RUN_TEST(model_io_failed);
+  RUN_TEST(model_bad_input);
   RUN_TEST(model_sink_ill_formed);
   RUN_TEST(model_compose);
   RUN_TEST(model_stdio);
