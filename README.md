@@ -21,7 +21,7 @@ port is fixed.
 | Directory       | Language | Status      | CI                                                                                                                                                                           |
 |-----------------|----------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [c99](c99/)     | C99      | In progress | [![c99](https://github.com/PawelPajor/dots-codec/actions/workflows/c99.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/c99.yml)       |
-| [cpp23](cpp23/) | C++23    | Planned     | [![cpp23](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp23.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp23.yml) |
+| [cpp23](cpp23/) | C++23    | In progress | [![cpp23](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp23.yml/badge.svg?branch=main)](https://github.com/PawelPajor/dots-codec/actions/workflows/cpp23.yml) |
 
 More languages follow, in order of demand. Each port has its own version
 and release tags.

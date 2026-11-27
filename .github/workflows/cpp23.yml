@@ -20,13 +20,17 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest, cxx: g++ }
-          - { os: ubuntu-latest, cxx: clang++ }
+          # Clang before 19 cannot use the std::expected of libstdc++.
+          - { os: ubuntu-latest, cxx: clang++-19, apt: clang-19 }
           - { os: macos-latest }
           - { os: windows-latest }
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: true
+      - name: Install the compiler
+        if: matrix.apt
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
       - name: Configure
         run: cmake -S cpp23 -B build ${{ matrix.cxx && format('-DCMAKE_CXX_COMPILER={0}', matrix.cxx) || '' }}
       - name: Build
